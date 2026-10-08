@@ -1,0 +1,27 @@
+:root{--bg:#f4f4f2;--card:#fff;--fg:#1d1d1f;--mut:#6b6b70;--line:#e2e2e0;--acc:#2f6fdf;--ok:#1f9d55;--bad:#c63b3b}
+@media (prefers-color-scheme:dark){:root{--bg:#141416;--card:#1e1e21;--fg:#ececee;--mut:#9a9aa2;--line:#2e2e33;--acc:#5b8ff0;--ok:#3cc47a;--bad:#e06464}}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--fg);font:15px/1.4 system-ui,-apple-system,Segoe UI,Roboto,sans-serif}
+main{max-width:860px;margin:0 auto;padding:16px}
+h1{font-size:20px;margin:4px 0 12px;display:flex;align-items:center;gap:10px;flex-wrap:wrap}
+h2{font-size:14px;text-transform:uppercase;letter-spacing:.05em;color:var(--mut);margin:0 0 10px}
+.card{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:14px;margin-bottom:14px}
+.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px}
+.stat b{display:block;font-size:17px;font-variant-numeric:tabular-nums}
+.stat span{color:var(--mut);font-size:12px}
+.dot{width:10px;height:10px;border-radius:50%;display:inline-block;background:var(--mut)}
+.dot.on{background:var(--ok)}
+label{display:block;font-size:13px;color:var(--mut);margin-bottom:3px}
+input,select{width:100%;padding:8px;border:1px solid var(--line);border-radius:6px;background:var(--bg);color:var(--fg);font:inherit}
+.row{display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:10px;margin-bottom:10px}
+.hint{font-size:12px;color:var(--mut);margin-top:3px}
+button{padding:9px 14px;border:0;border-radius:6px;background:var(--acc);color:#fff;font:inherit;cursor:pointer}
+button.sec{background:transparent;color:var(--fg);border:1px solid var(--line)}
+button.danger{background:var(--bad)}
+.actions{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
+#msg{font-size:13px}
+#chan{display:grid;grid-template-columns:repeat(32,1fr);gap:1px;margin-top:6px}
+#chan div{height:18px;background:var(--line);position:relative}
+#chan div i{position:absolute;left:0;right:0;bottom:0;background:var(--acc)}
+@media (max-width:560px){#chan{grid-template-columns:repeat(16,1fr)}}
+.pill{font-size:12px;padding:2px 8px;border-radius:99px;border:1px solid var(--line);color:var(--mut);font-weight:400}

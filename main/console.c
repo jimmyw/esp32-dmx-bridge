@@ -28,8 +28,6 @@ static const char *TAG = "console";
 #define IDLE_SCAN   8    // idle: look for new clients every ~0.5 s
 #define STALL_LIMIT 75   // close a client whose socket stays full this many pushes (~5 s)
 
-extern const char console_html_start[] asm("_binary_console_html_start");
-extern const char console_html_end[] asm("_binary_console_html_end");
 
 static httpd_handle_t s_server;
 static volatile int s_idle_left;
@@ -60,13 +58,6 @@ static int *stall_counter(int fd)
         }
     }
     return NULL;
-}
-
-static esp_err_t console_get(httpd_req_t *req)
-{
-    httpd_resp_set_type(req, "text/html");
-    httpd_resp_set_hdr(req, "Cache-Control", "no-store");
-    return httpd_resp_send(req, console_html_start, console_html_end - console_html_start - 1);
 }
 
 static void apply_records(const uint8_t *p, size_t len)
@@ -366,11 +357,9 @@ static void push_task(void *arg)
 esp_err_t console_register(httpd_handle_t server)
 {
     s_server = server;
-    const httpd_uri_t page = { .uri = "/console", .method = HTTP_GET, .handler = console_get };
     const httpd_uri_t ws = { .uri = "/ws", .method = HTTP_GET, .handler = ws_handler, .is_websocket = true };
     const httpd_uri_t names_get_uri = { .uri = "/api/names", .method = HTTP_GET, .handler = names_get_handler };
     const httpd_uri_t names_post_uri = { .uri = "/api/names", .method = HTTP_POST, .handler = names_post_handler };
-    httpd_register_uri_handler(server, &page);
     httpd_register_uri_handler(server, &ws);
     httpd_register_uri_handler(server, &names_get_uri);
     httpd_register_uri_handler(server, &names_post_uri);

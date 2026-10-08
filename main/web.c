@@ -3,6 +3,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include "assets.h"
 #include "cJSON.h"
 #include "config.h"
 #include "console.h"
@@ -19,8 +20,6 @@
 
 static const char *TAG = "web";
 
-extern const char index_html_start[] asm("_binary_index_html_start");
-extern const char index_html_end[] asm("_binary_index_html_end");
 
 static void restart_cb(void *arg)
 {
@@ -59,14 +58,6 @@ static esp_err_t send_error(httpd_req_t *req, const char *msg)
     cJSON_AddStringToObject(r, "error", msg);
     httpd_resp_set_status(req, "400 Bad Request");
     return send_json(req, r);
-}
-
-static esp_err_t index_get(httpd_req_t *req)
-{
-    httpd_resp_set_type(req, "text/html");
-    httpd_resp_set_hdr(req, "Cache-Control", "no-store");
-    // EMBED_TXTFILES appends a NUL terminator
-    return httpd_resp_send(req, index_html_start, index_html_end - index_html_start - 1);
 }
 
 static const char *src_name(uint8_t t)
@@ -417,7 +408,6 @@ esp_err_t web_start(void)
         return err;
     }
     const httpd_uri_t uris[] = {
-        { .uri = "/",                  .method = HTTP_GET,  .handler = index_get },
         { .uri = "/api/status",        .method = HTTP_GET,  .handler = status_get },
         { .uri = "/api/config",        .method = HTTP_GET,  .handler = config_get },
         { .uri = "/api/config",        .method = HTTP_POST, .handler = config_post },
@@ -431,6 +421,7 @@ esp_err_t web_start(void)
     for (size_t i = 0; i < n - 1; i++) {
         httpd_register_uri_handler(server, &uris[i]);
     }
+    assets_register(server);
     console_register(server);
     httpd_register_uri_handler(server, &uris[n - 1]);   // "/*" catch-all last
     ESP_LOGI(TAG, "web UI on port 80");
