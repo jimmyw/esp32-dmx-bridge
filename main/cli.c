@@ -5,6 +5,7 @@
 #include <string.h>
 #include "argtable3/argtable3.h"
 #include "config.h"
+#include "console.h"
 #include "dmx_buffer.h"
 #include "esp_app_desc.h"
 #include "esp_console.h"
@@ -12,6 +13,7 @@
 #include "esp_ota_ops.h"
 #include "esp_system.h"
 #include "esp_timer.h"
+#include "names.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "wifi_mgr.h"
@@ -241,6 +243,48 @@ static int cmd_dmx(int argc, char **argv)
     return 0;
 }
 
+/* ---- name <ch> [text] / names ---- */
+
+static int cmd_name(int argc, char **argv)
+{
+    if (argc < 2) {
+        printf("Usage: name <channel 1-512> [text]   (no text = remove; quote text with spaces)\n");
+        return 1;
+    }
+    char *end;
+    long ch = strtol(argv[1], &end, 10);
+    if (*end || ch < 1 || ch > DMX_SLOTS) {
+        printf("Error: channel must be 1-512\n");
+        return 1;
+    }
+    // Allow unquoted multi-word names: join the remaining arguments.
+    char text[NAME_MAX_LEN * 2 + 1] = "";
+    for (int i = 2; i < argc; i++) {
+        if (i > 2) strlcat(text, " ", sizeof(text));
+        strlcat(text, argv[i], sizeof(text));
+    }
+    names_set(ch - 1, text);
+    names_save_soon();
+    console_names_changed();
+    printf("Channel %ld: %s\n", ch, names_get(ch - 1)[0] ? names_get(ch - 1) : "(no name)");
+    return 0;
+}
+
+static int cmd_names(int argc, char **argv)
+{
+    int n = 0;
+    for (int i = 0; i < DMX_SLOTS; i++) {
+        if (names_get(i)[0]) {
+            printf("%4d  %s\n", i + 1, names_get(i));
+            n++;
+        }
+    }
+    if (!n) {
+        printf("No channel names set. Use: name <channel> <text>\n");
+    }
+    return 0;
+}
+
 /* ---- misc ---- */
 
 static int cmd_reboot(int argc, char **argv)
@@ -306,6 +350,8 @@ esp_err_t cli_start(void)
           .func = cmd_wifi, .argtable = &wifi_args },
         { .command = "scan", .help = "Scan for Wi-Fi networks", .func = cmd_scan },
         { .command = "dmx", .help = "Show current DMX output values", .func = cmd_dmx, .argtable = &dmx_args },
+        { .command = "name", .help = "Name a channel: name <1-512> [text] (no text = remove)", .func = cmd_name },
+        { .command = "names", .help = "List channel names", .func = cmd_names },
         { .command = "log", .help = "Set log level: log <none|error|warn|info|debug> [tag]", .func = cmd_log },
         { .command = "reboot", .help = "Restart the bridge", .func = cmd_reboot },
         { .command = "factory_reset", .help = "Erase all settings: factory_reset yes", .func = cmd_factory_reset },

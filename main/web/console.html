@@ -37,6 +37,13 @@ button:active{background:var(--line)}
 .cap::after{content:"";position:absolute;left:4px;right:4px;top:9px;height:2px;background:#333}
 .master .cap{background:linear-gradient(#ffd38a,#d08a20)}
 .ch{font-size:12px;color:var(--mut);font-variant-numeric:tabular-nums}
+.nm{width:100%;height:30px;font-size:11px;line-height:13px;text-align:center;overflow:hidden;cursor:text;
+  border-radius:4px;background:#0f0f12;border:1px solid var(--line);padding:1px 2px;margin-bottom:5px;
+  display:flex;align-items:center;justify-content:center;word-break:break-word;color:var(--fg)}
+.nm.empty{color:#55555f}
+.nm input{width:100%;background:var(--bg);color:var(--fg);border:1px solid var(--acc);border-radius:3px;
+  font:inherit;font-size:12px;padding:2px;text-align:center}
+.master .nm{cursor:default;color:var(--acc);border-color:#4a3a20}
 .btns{display:flex;flex-direction:column;gap:4px;width:100%;margin-top:6px}
 .btns button{padding:6px 0;font-size:12px;width:100%}
 .btns button.fl:active,.btns button.fl.down{background:var(--acc);color:#000}
@@ -78,7 +85,7 @@ const fmt = v => pct ? Math.round(v / 2.55) + '%' : String(v);
 function makeStrip(parent, isMaster) {
   const el = document.createElement('div');
   if (!isMaster) el.className = 'strip';
-  el.innerHTML = `<div class="val"></div>
+  el.innerHTML = `<div class="nm"></div><div class="val"></div>
     <div class="track"><div class="slot"></div><div class="fill"></div><div class="meter"></div><div class="cap"></div></div>
     <div class="ch"></div>
     <div class="btns"><button class="fl">${isMaster ? 'DBO' : 'Flash'}</button><button class="zero">${isMaster ? 'Full' : '0'}</button></div>`;
@@ -89,8 +96,10 @@ function makeStrip(parent, isMaster) {
     val: root.querySelector('.val'), track: root.querySelector('.track'), cap: root.querySelector('.cap'),
     fill: root.querySelector('.fill'), meter: root.querySelector('.meter'), label: root.querySelector('.ch'),
     fl: root.querySelector('.fl'), zero: root.querySelector('.zero'), isMaster,
+    nm: root.querySelector('.nm'),
   };
   bindFader(s);
+  if (!isMaster) s.nm.addEventListener('click', () => editName(s));
   return s;
 }
 
@@ -158,6 +167,7 @@ function render(s) {
 
 const masterStrip = makeStrip(document.getElementById('masterStrip'), true);
 masterStrip.label.textContent = 'Master';
+masterStrip.nm.textContent = 'MASTER';
 masterStrip.meter.style.display = 'none';
 
 function layout() {
@@ -171,7 +181,7 @@ function layout() {
     for (let i = 0; i < size; i++) strips.push(makeStrip(box, false));
   }
   bankStart = Math.min(Math.floor(bankStart / bankSize) * bankSize, N - bankSize);
-  strips.forEach((s, i) => { s.ch = bankStart + i; s.label.textContent = s.ch + 1; });
+  strips.forEach((s, i) => { s.ch = bankStart + i; s.label.textContent = s.ch + 1; renderName(s); });
   document.getElementById('bank').textContent = `Ch ${bankStart + 1}–${bankStart + bankSize}`;
   try { localStorage.setItem('bank', bankStart); } catch (e) {}
   renderAll();
@@ -210,6 +220,61 @@ window.addEventListener('keydown', e => {
   if (e.key === 'ArrowRight' || e.key === 'PageDown') go(1);
 });
 
+// ---- channel names (stored on the bridge, shared by all clients) ----
+const names = {};   // 0-based channel -> name
+let nameMax = 24;
+
+function renderName(s) {
+  if (s.editing) return;
+  const n = names[s.ch] || '';
+  s.nm.textContent = n || 'name';
+  s.nm.classList.toggle('empty', !n);
+  s.root.title = n ? `Ch ${s.ch + 1}: ${n}` : `Ch ${s.ch + 1}`;
+}
+
+async function fetchNames() {
+  try {
+    const r = await (await fetch('/api/names')).json();
+    nameMax = r.max_len || nameMax;
+    for (const k in names) delete names[k];
+    for (const [ch, n] of Object.entries(r.names)) names[+ch - 1] = n;
+    strips.forEach(renderName);
+  } catch (e) {}
+}
+
+function editName(s) {
+  if (s.editing) return;
+  s.editing = true;
+  const ch = s.ch, inp = document.createElement('input');
+  inp.value = names[ch] || ''; inp.maxLength = nameMax; inp.placeholder = `Ch ${ch + 1}`;
+  inp.setAttribute('aria-label', `name for channel ${ch + 1}`);
+  s.nm.textContent = ''; s.nm.classList.remove('empty'); s.nm.appendChild(inp);
+  inp.focus(); inp.select();
+  let done = false;
+  const finish = async save => {
+    if (done) return; done = true; s.editing = false;
+    const v = inp.value.trim();
+    if (save && v !== (names[ch] || '')) {
+      if (v) names[ch] = v; else delete names[ch];
+      try {
+        await fetch('/api/names', {method: 'POST', headers: {'Content-Type': 'application/json'},
+                                   body: JSON.stringify({[ch + 1]: v})});
+      } catch (e) {}
+    }
+    if (s.ch === ch) renderName(s);
+  };
+  inp.addEventListener('keydown', e => {
+    if (e.key === 'Enter') { e.preventDefault(); finish(true); }
+    else if (e.key === 'Escape') finish(false);
+    else if (e.key === 'Tab') {               // Tab = save and edit the next strip
+      e.preventDefault(); finish(true);
+      const i = strips.indexOf(s) + (e.shiftKey ? -1 : 1);
+      if (strips[i]) setTimeout(() => editName(strips[i]), 0);
+    }
+  });
+  inp.addEventListener('blur', () => finish(true));
+}
+
 // ---- network ----
 let sendTimer = null, lastSend = 0;
 function scheduleSend() {
@@ -231,10 +296,11 @@ function flush() {
 function connect() {
   ws = new WebSocket(`ws://${location.host}/ws`);
   ws.binaryType = 'arraybuffer';
-  ws.onopen = () => { document.getElementById('conn').className = 'dot on'; flush(); };
+  ws.onopen = () => { document.getElementById('conn').className = 'dot on'; flush(); fetchNames(); };
   ws.onclose = () => { document.getElementById('conn').className = 'dot'; setTimeout(connect, 1500); };
   ws.onerror = () => ws.close();
   ws.onmessage = ev => {
+    if (typeof ev.data === 'string') { if (ev.data === 'names') fetchNames(); return; }
     const d = new Uint8Array(ev.data);
     if (d[0] !== 1 || d.length < 2 + 2 * N) return;
     const now = performance.now(), fresh = ch => now - (touched.get(ch) || 0) < 400;

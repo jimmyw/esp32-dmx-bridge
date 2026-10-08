@@ -184,7 +184,7 @@ async function poll() {
     for (let i = 0; i < 512; i++) {
       const v = parseInt(d.values.substr(i * 2, 2), 16);
       bars[i][1].style.height = (v / 2.55) + '%';
-      bars[i][0].title = `Ch ${i + 1}: ${v}`;
+      bars[i][0].title = `Ch ${i + 1}${chNames[i + 1] ? ' ' + chNames[i + 1] : ''}: ${v}`;
     }
   } catch (e) {
     $('s_wifi').textContent = 'offline';
@@ -253,6 +253,9 @@ $('fw_upload').onclick = () => {
   $('fw_upload').disabled = true; pr.hidden = false; pr.value = 0; say('Uploading…');
   x.send(f);
 };
+
+let chNames = {};
+fetch('/api/names').then(r => r.json()).then(r => { chNames = r.names; }).catch(() => {});
 
 loadConfig();
 poll();

@@ -1,8 +1,12 @@
 #include "console.h"
 
+#include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
+#include "cJSON.h"
 #include "dmx_buffer.h"
 #include "esp_log.h"
+#include "names.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "lwip/sockets.h"
@@ -14,6 +18,7 @@ static const char *TAG = "console";
  *   client -> server: repeated 3-byte records [ch_hi, ch_lo, value]; ch 0..511, 0xFFFF = master.
  *                     text "clear" zeroes all console faders.
  *   server -> client: every PUSH_MS: [0x01][master][manual x512][output x512]
+ *                     text "names" when channel names changed (clients re-fetch /api/names).
  */
 #define PUSH_MS     66
 #define MASTER_CH   0xFFFF
@@ -132,6 +137,112 @@ static void push_work(void *arg)
     }
 }
 
+static void names_changed_work(void *arg)
+{
+    size_t fds_n = MAX_CLIENTS;
+    int fds[MAX_CLIENTS];
+    if (httpd_get_client_list(s_server, &fds_n, fds) != ESP_OK) {
+        return;
+    }
+    httpd_ws_frame_t f = { .type = HTTPD_WS_TYPE_TEXT, .payload = (uint8_t *)"names", .len = 5, .final = true };
+    for (size_t i = 0; i < fds_n; i++) {
+        if (httpd_ws_get_fd_info(s_server, fds[i]) == HTTPD_WS_CLIENT_WEBSOCKET && writable(fds[i])) {
+            httpd_ws_send_frame_async(s_server, fds[i], &f);
+        }
+    }
+}
+
+void console_names_changed(void)
+{
+    if (s_server) {
+        httpd_queue_work(s_server, names_changed_work, NULL);
+    }
+}
+
+static esp_err_t send_json(httpd_req_t *req, cJSON *root)
+{
+    char *js = cJSON_PrintUnformatted(root);
+    cJSON_Delete(root);
+    if (!js) {
+        return httpd_resp_send_500(req);
+    }
+    httpd_resp_set_type(req, "application/json");
+    httpd_resp_set_hdr(req, "Cache-Control", "no-store");
+    esp_err_t err = httpd_resp_sendstr(req, js);
+    free(js);
+    return err;
+}
+
+// GET /api/names -> {"max_len":24,"names":{"1":"Front wash",...}}  (1-based channel numbers)
+static esp_err_t names_get_handler(httpd_req_t *req)
+{
+    cJSON *r = cJSON_CreateObject();
+    cJSON_AddNumberToObject(r, "max_len", NAME_MAX_LEN);
+    cJSON *n = cJSON_AddObjectToObject(r, "names");
+    char key[8];
+    for (int i = 0; i < DMX_SLOTS; i++) {
+        const char *nm = names_get(i);
+        if (nm[0]) {
+            snprintf(key, sizeof(key), "%d", i + 1);
+            cJSON_AddStringToObject(n, key, nm);
+        }
+    }
+    return send_json(req, r);
+}
+
+// POST /api/names {"1":"Front wash","2":""}  ("" removes a name), or {"clear":true}
+static esp_err_t names_post_handler(httpd_req_t *req)
+{
+    if (req->content_len <= 0 || req->content_len > 24 * 1024) {
+        httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "bad body length");
+        return ESP_FAIL;
+    }
+    char *body = malloc(req->content_len + 1);
+    if (!body) {
+        return httpd_resp_send_500(req);
+    }
+    int got = 0;
+    while (got < req->content_len) {
+        int n = httpd_req_recv(req, body + got, req->content_len - got);
+        if (n <= 0) {
+            free(body);
+            return ESP_FAIL;
+        }
+        got += n;
+    }
+    body[got] = '\0';
+    cJSON *root = cJSON_Parse(body);
+    free(body);
+    if (!cJSON_IsObject(root)) {
+        cJSON_Delete(root);
+        httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "invalid JSON");
+        return ESP_FAIL;
+    }
+    int changed = 0;
+    if (cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(root, "clear"))) {
+        names_clear_all();
+        changed++;
+    }
+    cJSON *it;
+    cJSON_ArrayForEach(it, root) {
+        char *end;
+        long ch = strtol(it->string, &end, 10);
+        if (*end == '\0' && ch >= 1 && ch <= DMX_SLOTS && cJSON_IsString(it)) {
+            names_set(ch - 1, it->valuestring);
+            changed++;
+        }
+    }
+    cJSON_Delete(root);
+    if (changed) {
+        names_save_soon();
+        console_names_changed();
+    }
+    cJSON *r = cJSON_CreateObject();
+    cJSON_AddBoolToObject(r, "ok", true);
+    cJSON_AddNumberToObject(r, "changed", changed);
+    return send_json(req, r);
+}
+
 static void push_task(void *arg)
 {
     // Newer IDF versions don't call the URI handler for the handshake, so new clients are
@@ -150,8 +261,12 @@ esp_err_t console_register(httpd_handle_t server)
     s_server = server;
     const httpd_uri_t page = { .uri = "/console", .method = HTTP_GET, .handler = console_get };
     const httpd_uri_t ws = { .uri = "/ws", .method = HTTP_GET, .handler = ws_handler, .is_websocket = true };
+    const httpd_uri_t names_get_uri = { .uri = "/api/names", .method = HTTP_GET, .handler = names_get_handler };
+    const httpd_uri_t names_post_uri = { .uri = "/api/names", .method = HTTP_POST, .handler = names_post_handler };
     httpd_register_uri_handler(server, &page);
     httpd_register_uri_handler(server, &ws);
+    httpd_register_uri_handler(server, &names_get_uri);
+    httpd_register_uri_handler(server, &names_post_uri);
     xTaskCreate(push_task, "console_push", 2560, NULL, 4, NULL);
     return ESP_OK;
 }

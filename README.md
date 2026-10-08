@@ -99,6 +99,12 @@ A lighting-desk style page at `http://dmx-bridge-XXXX.local/console` (button on 
   down, even when QLC+ stops.
 * Several phones/tablets can be open at once. A WebSocket (`/ws`) keeps them in sync, at about
   15 updates/s.
+* **Channel names:** tap the label at the top of a strip to name it (up to 24 bytes, UTF-8).
+  Enter saves, Esc cancels, Tab moves to the next strip. Names are stored on the bridge, in
+  the `storage` partition as two alternating copies so a power cut can't corrupt them. They're
+  shared by every device and update live on all open consoles. API: `GET /api/names`,
+  `POST /api/names` with `{"1":"Front wash","2":""}` (empty = remove) or `{"clear":true}`.
+  Serial console: `name 1 Front wash`, `names`.
 * Values can show as DMX (0–255) or %. The chosen bank and units are remembered per browser.
 
 ## Web UI
@@ -132,6 +138,7 @@ The USB-Serial/JTAG port carries the log and a command line (`dmx>` prompt):
 | `scan` | list nearby Wi-Fi networks |
 | `config` | show all settings |
 | `set <key> <value>` | change a setting, e.g. `set sacn_universe 2`, `set protocol artnet`, `set on_loss blackout` |
+| `name <ch> [text]` / `names` | set (no text = remove) / list channel names |
 | `dmx [n]` | show the first n output channels (default 32) |
 | `log <level> [tag]` | change log verbosity, e.g. `log warn` to quiet the console |
 | `reboot` / `factory_reset yes` | restart / erase all settings |
