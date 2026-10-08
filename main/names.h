@@ -11,3 +11,6 @@ const char *names_get(int ch);                 // "" when unnamed
 bool        names_set(int ch, const char *name);   // false if ch is out of range
 void        names_clear_all(void);
 void        names_save_soon(void);             // debounced write to flash
+
+// Trim, drop control chars and cut to NAME_MAX_LEN bytes on a UTF-8 boundary.
+void        names_sanitize(char dst[NAME_MAX_LEN + 1], const char *src);

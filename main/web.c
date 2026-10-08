@@ -402,7 +402,7 @@ static esp_err_t redirect_get(httpd_req_t *req)
 esp_err_t web_start(void)
 {
     httpd_config_t cfg = HTTPD_DEFAULT_CONFIG();
-    cfg.max_uri_handlers = 20;
+    cfg.max_uri_handlers = 24;
     cfg.max_open_sockets = 10;
     cfg.stack_size = 8192;
     cfg.lru_purge_enable = true;

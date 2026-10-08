@@ -7,6 +7,7 @@
 #include "dmx_buffer.h"
 #include "esp_log.h"
 #include "names.h"
+#include "scenes.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "lwip/sockets.h"
@@ -18,7 +19,7 @@ static const char *TAG = "console";
  *   client -> server: repeated 3-byte records [ch_hi, ch_lo, value]; ch 0..511, 0xFFFF = master.
  *                     text "clear" zeroes all console faders.
  *   server -> client: every PUSH_MS: [0x01][master][manual x512][output x512]
- *                     text "names" when channel names changed (clients re-fetch /api/names).
+ *                     text "names" / "scenes" when those changed (clients re-fetch the API).
  */
 #define PUSH_MS     66
 #define MASTER_CH   0xFFFF
@@ -75,6 +76,7 @@ static void apply_records(const uint8_t *p, size_t len)
         if (ch == MASTER_CH) {
             dmx_buffer_set_manual_master(p[i + 2]);
         } else {
+            scenes_release_channel(ch);   // a hand on the fader wins over a running fade
             dmx_buffer_set_manual(ch, p[i + 2]);
         }
     }
@@ -96,6 +98,7 @@ static esp_err_t ws_handler(httpd_req_t *req)
     if (f.type == HTTPD_WS_TYPE_BINARY) {
         apply_records(buf, f.len);
     } else if (f.type == HTTPD_WS_TYPE_TEXT && f.len == 5 && memcmp(buf, "clear", 5) == 0) {
+        scenes_stop_fade();
         dmx_buffer_clear_manual();
     }
     return ESP_OK;
@@ -137,14 +140,16 @@ static void push_work(void *arg)
     }
 }
 
-static void names_changed_work(void *arg)
+// arg: static string to broadcast as a text frame
+static void broadcast_text_work(void *arg)
 {
+    const char *msg = arg;
     size_t fds_n = MAX_CLIENTS;
     int fds[MAX_CLIENTS];
     if (httpd_get_client_list(s_server, &fds_n, fds) != ESP_OK) {
         return;
     }
-    httpd_ws_frame_t f = { .type = HTTPD_WS_TYPE_TEXT, .payload = (uint8_t *)"names", .len = 5, .final = true };
+    httpd_ws_frame_t f = { .type = HTTPD_WS_TYPE_TEXT, .payload = (uint8_t *)msg, .len = strlen(msg), .final = true };
     for (size_t i = 0; i < fds_n; i++) {
         if (httpd_ws_get_fd_info(s_server, fds[i]) == HTTPD_WS_CLIENT_WEBSOCKET && writable(fds[i])) {
             httpd_ws_send_frame_async(s_server, fds[i], &f);
@@ -155,7 +160,14 @@ static void names_changed_work(void *arg)
 void console_names_changed(void)
 {
     if (s_server) {
-        httpd_queue_work(s_server, names_changed_work, NULL);
+        httpd_queue_work(s_server, broadcast_text_work, (void *)"names");
+    }
+}
+
+static void scenes_changed(void)
+{
+    if (s_server) {
+        httpd_queue_work(s_server, broadcast_text_work, (void *)"scenes");
     }
 }
 
@@ -171,6 +183,45 @@ static esp_err_t send_json(httpd_req_t *req, cJSON *root)
     esp_err_t err = httpd_resp_sendstr(req, js);
     free(js);
     return err;
+}
+
+static cJSON *read_json_body(httpd_req_t *req, int max_len)
+{
+    if (req->content_len <= 0 || req->content_len > max_len) {
+        return NULL;
+    }
+    char *body = malloc(req->content_len + 1);
+    if (!body) {
+        return NULL;
+    }
+    int got = 0;
+    while (got < req->content_len) {
+        int n = httpd_req_recv(req, body + got, req->content_len - got);
+        if (n <= 0) {
+            free(body);
+            return NULL;
+        }
+        got += n;
+    }
+    body[got] = '\0';
+    cJSON *root = cJSON_Parse(body);
+    free(body);
+    if (!cJSON_IsObject(root)) {
+        cJSON_Delete(root);
+        return NULL;
+    }
+    return root;
+}
+
+static esp_err_t json_result(httpd_req_t *req, const char *err)
+{
+    cJSON *r = cJSON_CreateObject();
+    cJSON_AddBoolToObject(r, "ok", err == NULL);
+    if (err) {
+        cJSON_AddStringToObject(r, "error", err);
+        httpd_resp_set_status(req, "400 Bad Request");
+    }
+    return send_json(req, r);
 }
 
 // GET /api/names -> {"max_len":24,"names":{"1":"Front wash",...}}  (1-based channel numbers)
@@ -193,30 +244,9 @@ static esp_err_t names_get_handler(httpd_req_t *req)
 // POST /api/names {"1":"Front wash","2":""}  ("" removes a name), or {"clear":true}
 static esp_err_t names_post_handler(httpd_req_t *req)
 {
-    if (req->content_len <= 0 || req->content_len > 24 * 1024) {
-        httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "bad body length");
-        return ESP_FAIL;
-    }
-    char *body = malloc(req->content_len + 1);
-    if (!body) {
-        return httpd_resp_send_500(req);
-    }
-    int got = 0;
-    while (got < req->content_len) {
-        int n = httpd_req_recv(req, body + got, req->content_len - got);
-        if (n <= 0) {
-            free(body);
-            return ESP_FAIL;
-        }
-        got += n;
-    }
-    body[got] = '\0';
-    cJSON *root = cJSON_Parse(body);
-    free(body);
-    if (!cJSON_IsObject(root)) {
-        cJSON_Delete(root);
-        httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "invalid JSON");
-        return ESP_FAIL;
+    cJSON *root = read_json_body(req, 24 * 1024);
+    if (!root) {
+        return json_result(req, "invalid JSON body");
     }
     int changed = 0;
     if (cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(root, "clear"))) {
@@ -243,6 +273,61 @@ static esp_err_t names_post_handler(httpd_req_t *req)
     return send_json(req, r);
 }
 
+// GET /api/scenes -> {"count":64,"active":3,"fading":false,"scenes":[{"id":1,"name":"Intro"},...]}
+static esp_err_t scenes_get_handler(httpd_req_t *req)
+{
+    cJSON *r = cJSON_CreateObject();
+    cJSON_AddNumberToObject(r, "count", SCENE_COUNT);
+    cJSON_AddNumberToObject(r, "active", scenes_active() + 1);   // 0 = none
+    cJSON_AddBoolToObject(r, "fading", scenes_fading());
+    cJSON *arr = cJSON_AddArrayToObject(r, "scenes");
+    for (int i = 0; i < SCENE_COUNT; i++) {
+        if (scenes_used(i)) {
+            cJSON *o = cJSON_CreateObject();
+            cJSON_AddNumberToObject(o, "id", i + 1);
+            cJSON_AddStringToObject(o, "name", scenes_name(i));
+            cJSON_AddItemToArray(arr, o);
+        }
+    }
+    return send_json(req, r);
+}
+
+// POST /api/scenes {"action":"recall|save|rename|delete","id":1..64,"name":"..","fade_ms":2000}
+static esp_err_t scenes_post_handler(httpd_req_t *req)
+{
+    cJSON *root = read_json_body(req, 1024);
+    if (!root) {
+        return json_result(req, "invalid JSON body");
+    }
+    const cJSON *action = cJSON_GetObjectItemCaseSensitive(root, "action");
+    const cJSON *idj = cJSON_GetObjectItemCaseSensitive(root, "id");
+    const cJSON *namej = cJSON_GetObjectItemCaseSensitive(root, "name");
+    const cJSON *fadej = cJSON_GetObjectItemCaseSensitive(root, "fade_ms");
+    const char *name = cJSON_IsString(namej) ? namej->valuestring : "";
+    int id = cJSON_IsNumber(idj) ? idj->valueint - 1 : -1;
+    const char *err = NULL;
+
+    if (!cJSON_IsString(action)) {
+        err = "missing action";
+    } else if (id < 0 || id >= SCENE_COUNT) {
+        err = "id must be 1-64";
+    } else if (strcmp(action->valuestring, "recall") == 0) {
+        int fade = cJSON_IsNumber(fadej) ? fadej->valueint : 0;
+        if (fade < 0) fade = 0;
+        if (scenes_recall(id, fade) != ESP_OK) err = "scene is empty";
+    } else if (strcmp(action->valuestring, "save") == 0) {
+        if (scenes_save(id, name) != ESP_OK) err = "save failed";
+    } else if (strcmp(action->valuestring, "rename") == 0) {
+        if (scenes_rename(id, name) != ESP_OK) err = "scene is empty";
+    } else if (strcmp(action->valuestring, "delete") == 0) {
+        if (scenes_delete(id) != ESP_OK) err = "delete failed";
+    } else {
+        err = "unknown action";
+    }
+    cJSON_Delete(root);
+    return json_result(req, err);
+}
+
 static void push_task(void *arg)
 {
     // Newer IDF versions don't call the URI handler for the handshake, so new clients are
@@ -267,6 +352,11 @@ esp_err_t console_register(httpd_handle_t server)
     httpd_register_uri_handler(server, &ws);
     httpd_register_uri_handler(server, &names_get_uri);
     httpd_register_uri_handler(server, &names_post_uri);
+    const httpd_uri_t scenes_get_uri = { .uri = "/api/scenes", .method = HTTP_GET, .handler = scenes_get_handler };
+    const httpd_uri_t scenes_post_uri = { .uri = "/api/scenes", .method = HTTP_POST, .handler = scenes_post_handler };
+    httpd_register_uri_handler(server, &scenes_get_uri);
+    httpd_register_uri_handler(server, &scenes_post_uri);
+    scenes_set_change_cb(scenes_changed);
     xTaskCreate(push_task, "console_push", 2560, NULL, 4, NULL);
     return ESP_OK;
 }

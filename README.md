@@ -105,6 +105,14 @@ A lighting-desk style page at `http://dmx-bridge-XXXX.local/console` (button on 
   shared by every device and update live on all open consoles. API: `GET /api/names`,
   `POST /api/names` with `{"1":"Front wash","2":""}` (empty = remove) or `{"clear":true}`.
   Serial console: `name 1 Front wash`, `names`.
+* **Scenes:** up to 64 snapshots of all console faders, stored on the bridge (one flash sector each,
+  CRC-checked). Tap a scene in the scene bar to recall it, using the **Fade s** time (0–60 s; the
+  fade runs on the bridge, so every open console sees it). Moving a fader during a fade takes
+  that channel out of the fade. **+ Save** stores the current faders in the next free slot. **Edit**
+  shows all 64 slots to overwrite, rename or delete (tap twice). Keys 1–9 recall the first nine
+  scenes. Scenes hold the console layer only; QLC+ input is not captured.
+  API: `GET /api/scenes`, `POST /api/scenes` with
+  `{"action":"recall|save|rename|delete","id":1-64,"name":"…","fade_ms":2000}`.
 * Values can show as DMX (0–255) or %. The chosen bank and units are remembered per browser.
 
 ## Web UI
@@ -139,6 +147,7 @@ The USB-Serial/JTAG port carries the log and a command line (`dmx>` prompt):
 | `config` | show all settings |
 | `set <key> <value>` | change a setting, e.g. `set sacn_universe 2`, `set protocol artnet`, `set on_loss blackout` |
 | `name <ch> [text]` / `names` | set (no text = remove) / list channel names |
+| `scene list` / `save <n> [name]` / `recall <n> [fade s]` / `rename <n> <name>` / `delete <n>` | console scenes |
 | `dmx [n]` | show the first n output channels (default 32) |
 | `log <level> [tag]` | change log verbosity, e.g. `log warn` to quiet the console |
 | `reboot` / `factory_reset yes` | restart / erase all settings |

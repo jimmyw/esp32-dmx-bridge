@@ -14,6 +14,7 @@
 #include "esp_system.h"
 #include "esp_timer.h"
 #include "names.h"
+#include "scenes.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "wifi_mgr.h"
@@ -285,6 +286,67 @@ static int cmd_names(int argc, char **argv)
     return 0;
 }
 
+/* ---- scene list|save|recall|rename|delete ---- */
+
+static int cmd_scene(int argc, char **argv)
+{
+    const char *usage =
+        "Usage: scene list\n"
+        "       scene save <1-64> [name]        capture the console faders\n"
+        "       scene recall <1-64> [fade sec]  e.g. scene recall 3 2.5\n"
+        "       scene rename <1-64> <name>\n"
+        "       scene delete <1-64>\n";
+    if (argc < 2 || strcmp(argv[1], "list") == 0) {
+        int n = 0;
+        for (int i = 0; i < SCENE_COUNT; i++) {
+            if (scenes_used(i)) {
+                printf("%3d %c %s\n", i + 1, scenes_active() == i ? '*' : ' ', scenes_name(i));
+                n++;
+            }
+        }
+        if (!n) {
+            printf("No scenes stored.\n%s", argc < 2 ? usage : "");
+        }
+        return 0;
+    }
+    if (argc < 3) {
+        printf("%s", usage);
+        return 1;
+    }
+    char *end;
+    long id = strtol(argv[2], &end, 10);
+    if (*end || id < 1 || id > SCENE_COUNT) {
+        printf("Error: scene number must be 1-%d\n", SCENE_COUNT);
+        return 1;
+    }
+    char text[NAME_MAX_LEN * 2 + 1] = "";
+    for (int i = 3; i < argc; i++) {
+        if (i > 3) strlcat(text, " ", sizeof(text));
+        strlcat(text, argv[i], sizeof(text));
+    }
+    esp_err_t err;
+    const char *op = argv[1];
+    if (strcmp(op, "save") == 0) {
+        err = scenes_save(id - 1, text);
+    } else if (strcmp(op, "recall") == 0) {
+        float fade = argc > 3 ? strtof(argv[3], NULL) : 0;
+        err = scenes_recall(id - 1, fade > 0 ? (uint32_t)(fade * 1000) : 0);
+    } else if (strcmp(op, "rename") == 0) {
+        err = scenes_rename(id - 1, text);
+    } else if (strcmp(op, "delete") == 0) {
+        err = scenes_delete(id - 1);
+    } else {
+        printf("%s", usage);
+        return 1;
+    }
+    if (err != ESP_OK) {
+        printf("Error: %s\n", err == ESP_ERR_NOT_FOUND ? "scene is empty" : esp_err_to_name(err));
+        return 1;
+    }
+    printf("OK: %s scene %ld%s%s\n", op, id, scenes_used(id - 1) ? " - " : "", scenes_name(id - 1));
+    return 0;
+}
+
 /* ---- misc ---- */
 
 static int cmd_reboot(int argc, char **argv)
@@ -352,6 +414,7 @@ esp_err_t cli_start(void)
         { .command = "dmx", .help = "Show current DMX output values", .func = cmd_dmx, .argtable = &dmx_args },
         { .command = "name", .help = "Name a channel: name <1-512> [text] (no text = remove)", .func = cmd_name },
         { .command = "names", .help = "List channel names", .func = cmd_names },
+        { .command = "scene", .help = "Console scenes: scene list|save|recall|rename|delete", .func = cmd_scene },
         { .command = "log", .help = "Set log level: log <none|error|warn|info|debug> [tag]", .func = cmd_log },
         { .command = "reboot", .help = "Restart the bridge", .func = cmd_reboot },
         { .command = "factory_reset", .help = "Erase all settings: factory_reset yes", .func = cmd_factory_reset },

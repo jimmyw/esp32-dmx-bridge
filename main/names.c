@@ -132,9 +132,11 @@ const char *names_get(int ch)
     return (ch >= 0 && ch < DMX_SLOTS) ? s_names[ch] : "";
 }
 
-// Copy at most NAME_MAX_LEN bytes without splitting a UTF-8 sequence; drop control chars.
-static void copy_name(char *dst, const char *src)
+void names_sanitize(char dst[NAME_MAX_LEN + 1], const char *src)
 {
+    while (*src == ' ') {
+        src++;
+    }
     size_t o = 0;
     for (size_t i = 0; src[i] && o < NAME_MAX_LEN;) {
         unsigned char c = src[i];
@@ -160,12 +162,8 @@ bool names_set(int ch, const char *name)
     if (ch < 0 || ch >= DMX_SLOTS) {
         return false;
     }
-    const char *p = name;
-    while (*p == ' ') {
-        p++;
-    }
     xSemaphoreTake(s_lock, portMAX_DELAY);
-    copy_name(s_names[ch], p);
+    names_sanitize(s_names[ch], name);
     xSemaphoreGive(s_lock);
     return true;
 }
