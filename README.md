@@ -148,9 +148,11 @@ A lighting-desk style page at `http://dmx-bridge-XXXX.local/console` (button on 
   15 updates/s.
 * **Channel menu:** tap the name bar at the top of a strip to open its menu: set a name (up to
   24 bytes, UTF-8) or **Hide channel**. Enter saves, Esc cancels, Tab moves to the next strip.
-  Hidden channels are skipped when paging through banks; their DMX values are unchanged. Once
-  any channel is hidden, a **Show hidden (n)** button appears in the top bar: turn it on to see
-  hidden channels (dimmed) and use their menu to **Show channel again**.
+  Once any channel has a name, **unnamed channels are hidden**, so the console shows just your
+  fixtures' channels; naming a channel shows it. Named channels can be hidden from the menu too.
+  Hidden channels are skipped when paging through banks; their DMX values are unchanged. A
+  **Hidden n** button in the top bar shows them (dimmed) so you can name or **Show channel
+  again**; jumping to a hidden channel number turns it on as well.
   Names and hidden flags are stored on the bridge, in the `storage` partition as two alternating
   copies so a power cut can't corrupt them. They're shared by every device and update live on all
   open consoles. API: `GET /api/names` (`{"names":{...},"hidden":[5,6]}`), `POST /api/names`

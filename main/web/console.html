@@ -20,6 +20,7 @@ header h1{font-size:16px;margin:0 6px 0 0;font-weight:600}
 button,.btn{background:var(--strip);color:var(--fg);border:1px solid var(--line);border-radius:6px;padding:7px 11px;
   font:inherit;cursor:pointer;text-decoration:none;touch-action:manipulation}
 button:active{background:var(--line)}
+button:disabled{opacity:.5;cursor:default}
 #bank{font-variant-numeric:tabular-nums;min-width:92px;text-align:center}
 .sp{flex:1}
 #desk{flex:1;display:flex;gap:6px;padding:10px 12px;min-height:0}
@@ -245,7 +246,11 @@ function layout() {
     for (let i = 0; i < size; i++) strips.push(makeStrip(box, false));
   }
   chans = [];
-  for (let c = 0; c < N; c++) if (showHidden || !hidden.has(c)) chans.push(c);
+  hiddenCount = 0;
+  for (let c = 0; c < N; c++) {
+    if (!isHidden(c)) chans.push(c);
+    else { hiddenCount++; if (showHidden) chans.push(c); }
+  }
   // Keep the bank that holds bankCh (or the next visible channel after it).
   let idx = chans.findIndex(c => c >= bankCh);
   if (idx < 0) idx = chans.length - 1;
@@ -253,7 +258,7 @@ function layout() {
   strips.forEach((s, i) => {
     s.ch = page + i < chans.length ? chans[page + i] : -1;
     s.root.classList.toggle('blank', s.ch < 0);
-    s.root.classList.toggle('hid', hidden.has(s.ch));
+    s.root.classList.toggle('hid', s.ch >= 0 && isHidden(s.ch));
     s.label.textContent = s.ch < 0 ? '' : s.ch + 1;
     renderName(s);
   });
@@ -277,7 +282,7 @@ document.getElementById('prev').onclick = () => go(-1);
 document.getElementById('next').onclick = () => go(1);
 document.getElementById('jump').addEventListener('change', e => {
   const c = Math.max(1, Math.min(N, +e.target.value || 1)) - 1;
-  if (hidden.has(c) && !showHidden) { showHidden = true; saveShowHidden(); }   // jumping to a hidden one
+  if (isHidden(c) && !showHidden) { showHidden = true; saveShowHidden(); }   // jumping to a hidden one
   bankCh = c; e.target.value = ''; layout();
 });
 document.getElementById('units').onclick = e => {
@@ -309,22 +314,26 @@ window.addEventListener('keydown', e => {
 
 // ---- channel names / hidden channels (stored on the bridge, shared by all clients) ----
 const names = {};   // 0-based channel -> name
-let nameMax = 24;
+let nameMax = 24, hiddenCount = 0;
+// Unnamed channels are hidden once any channel has a name; named ones only when hidden explicitly.
+const anyNamed = () => { for (const k in names) return true; return false; };
+const isHidden = c => anyNamed() && (!names[c] || hidden.has(c));
 
 function renderName(s) {
   if (s.ch < 0) { s.nm.textContent = ''; s.root.title = ''; return; }
   const n = names[s.ch] || '';
   s.nm.textContent = n || 'name';
   s.nm.classList.toggle('empty', !n);
-  s.root.title = (n ? `Ch ${s.ch + 1}: ${n}` : `Ch ${s.ch + 1}`) + (hidden.has(s.ch) ? ' (hidden)' : '');
+  s.root.title = (n ? `Ch ${s.ch + 1}: ${n}` : `Ch ${s.ch + 1}`) + (isHidden(s.ch) ? (names[s.ch] ? ' (hidden)' : ' (hidden: no name)') : '');
 }
 
 function saveShowHidden() { try { localStorage.setItem('showHidden', showHidden ? '1' : '0'); } catch (e) {} }
 
 function renderHidBtn() {
   const b = document.getElementById('hidBtn');
-  b.hidden = hidden.size === 0;
-  b.textContent = `${showHidden ? 'Showing' : 'Show'} hidden (${hidden.size})`;
+  b.hidden = hiddenCount === 0;
+  b.textContent = `Hidden ${hiddenCount}`;
+  b.title = showHidden ? 'showing hidden channels (dimmed) – tap to hide them' : 'show hidden channels';
   b.classList.toggle('on', showHidden);
 }
 document.getElementById('hidBtn').onclick = () => { showHidden = !showHidden; saveShowHidden(); layout(); };
@@ -337,8 +346,8 @@ async function fetchNames() {
     for (const [ch, n] of Object.entries(r.names)) names[+ch - 1] = n;
     hidden.clear();
     for (const ch of r.hidden || []) hidden.add(ch - 1);
-    if (!hidden.size) showHidden = false;
     layout();
+    if (!hiddenCount && showHidden) { showHidden = false; saveShowHidden(); }
   } catch (e) {}
 }
 
@@ -357,13 +366,23 @@ function openChanMenu(s) {
   const m = document.getElementById('chmenu'), inp = document.getElementById('cmName');
   document.getElementById('cmTitle').textContent = `Channel ${ch + 1}`;
   inp.value = names[ch] || ''; inp.maxLength = nameMax; inp.placeholder = `Name for ch ${ch + 1}`;
-  document.getElementById('cmHide').textContent = hidden.has(ch) ? 'Show channel again' : 'Hide channel';
+  renderHideBtn();
   m.hidden = false; document.getElementById('chback').hidden = false;
   const r = s.nm.getBoundingClientRect(), w = m.offsetWidth, h = m.offsetHeight;
   m.style.left = Math.max(8, Math.min(innerWidth - w - 8, r.left + r.width / 2 - w / 2)) + 'px';
   m.style.top = Math.max(8, Math.min(innerHeight - h - 8, r.bottom + 6)) + 'px';
   if (matchMedia('(pointer:fine)').matches) { inp.focus(); inp.select(); }   // no surprise keyboard on phones
 }
+// Unnamed channels can't be shown on their own: naming one shows it.
+function renderHideBtn() {
+  const ch = menuCh, b = document.getElementById('cmHide');
+  const v = document.getElementById('cmName').value.trim();
+  const unnamedHidden = anyNamed() && !v && !(Object.keys(names).length === 1 && names[ch]);
+  b.disabled = unnamedHidden;
+  b.textContent = unnamedHidden ? 'Hidden (no name)' : hidden.has(ch) ? 'Show channel again' : 'Hide channel';
+  b.title = b.disabled ? 'unnamed channels are hidden – give it a name to show it' : '';
+}
+document.getElementById('cmName').addEventListener('input', renderHideBtn);
 function closeChanMenu() {
   menuCh = -1;
   document.getElementById('chmenu').hidden = true; document.getElementById('chback').hidden = true;
@@ -373,11 +392,14 @@ function applyChanMenu(hide) {
   const ch = menuCh;
   if (ch < 0) return;
   const v = document.getElementById('cmName').value.trim(), body = {};
-  if (v !== (names[ch] || '')) { body[ch + 1] = v; if (v) names[ch] = v; else delete names[ch]; }
+  if (v !== (names[ch] || '')) {
+    // Naming a channel shows it, even if it was hidden explicitly while unnamed.
+    if (v && !names[ch] && hidden.has(ch) && hide === undefined) hide = false;
+    body[ch + 1] = v; if (v) names[ch] = v; else delete names[ch];
+  }
   if (hide !== undefined && hide !== hidden.has(ch)) {
     body.hidden = {[ch + 1]: hide};
     if (hide) hidden.add(ch); else hidden.delete(ch);
-    if (!hidden.size) showHidden = false;
   }
   closeChanMenu();
   if (Object.keys(body).length) { postNames(body); layout(); }
