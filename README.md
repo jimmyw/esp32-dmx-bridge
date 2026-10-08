@@ -24,10 +24,55 @@ receives one universe of Art-Net or sACN and sends it out as DMX512 through an R
 * This module labels its pins from the MCU's side, so **ESP TX goes to the module's TXD**. That's
   the input it drives onto A/B, confirmed on a scope. RXD is the module's output back to the MCU.
   The firmware only transmits, so RXD stays unconnected.
-* An auto-direction module drives "0" bits hard but "1" bits only through its bias resistors. Put
-  a 120 Ω terminator on the last fixture. If long cable runs are still unreliable, use a
-  DE-controlled MAX485/MAX3485 board.
+* **Bias resistors are required with this module (see below).**
 * Don't use GPIO19/20 (USB) or 22–32 (flash/PSRAM); the web UI rejects them.
+
+### Bias resistors and termination
+
+The auto-direction module only drives the line for "0" bits. For "1" bits (and idle) it drives a
+short pulse, then switches its driver off, and the bus would float at ~0 V between A and B. The
+board has no fail-safe bias resistors of its own. A DMX receiver needs **A−B ≥ +0.2 V** to read
+a "1", so add two resistors on the module's RS485 side:
+
+```
+  VCC (5 V) ──[ 680 Ω ]──┬── A (XLR pin 3) ════ cable ════╗
+                         │                               ║  last fixture:
+                         │                             [120 Ω] termination
+                         │                               ║  (A–B, far end only)
+  GND ───────[ 680 Ω ]──┴── B (XLR pin 2) ════ cable ════╝
+```
+
+* Pull-up **680 Ω from A to the module's 5 V VCC**, pull-down **680 Ω from B to GND**.
+  Use the real GND, the one on the TTL side that is shared with the ESP32. The pad marked GND next
+  to the A/B terminals on this board is **not** connected to power ground.
+* **Exactly one 120 Ω terminator, at the far end of the line** (last fixture or a terminator
+  plug). Remove the module's own 120 Ω (R0): a terminator at both ends acts like 60 Ω and halves
+  the "1" level, which then fails (+0.17 V measured).
+* Use the 5 V supply for the pull-up. Taken from 3.3 V, it gives less margin.
+
+Measured on a Rigol DHO924 with this wiring (4.75 V from USB, 120 Ω at the far end only):
+
+| | Measured | DMX512 needs |
+|---|---|---|
+| "1" bits / idle, A−B | +0.34 V (worst bit +0.27 V) | ≥ +0.2 V |
+| "0" bits / break, A−B | −2.25 V | ≤ −0.2 V |
+| Rising edge | driven to +2.2 V for ~470 ns, then held by the bias | |
+| Overshoot / settling | ≤ 0.1 V, ~160 ns | |
+| Bit time / break / MAB | 4.009 µs / 178 µs / 19–30 µs | 4 µs ±2 % / ≥ 88 µs / ≥ 8 µs |
+| Frame rate | 40.0 Hz (25.00 ms ± 0.05 ms) | ≤ 44 Hz |
+
+Results with the wrong wiring, for troubleshooting:
+
+| Wiring | "1" level (A−B) |
+|---|---|
+| No bias resistors (module as shipped) | +0.03 to +0.07 V ❌ |
+| Bias pull-down to the GND pad by A/B (not real GND) | +0.14 V ❌ |
+| Bias OK, 120 Ω at both ends | +0.17 V ❌ |
+| Bias OK, 120 Ω at far end only | **+0.34 V ✅** |
+
+The margin shrinks a little with long cables and each extra fixture. If fixtures misbehave on
+long runs, use a DE-controlled MAX485/MAX3485 board (`de_pin` setting), which drives "1" bits at
+about +2 V and needs no bias resistors.
 
 ## Build & flash
 
