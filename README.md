@@ -9,13 +9,17 @@ receives one universe of Art-Net or sACN and sends it out as DMX512 through an R
 |-----------------|--------------|--------------|
 | GPIO17 (TX)     | RXD          |              |
 | (unused)        | TXD          |              |
-| 3V3             | VCC          |              |
+| 5V (VBUS/VIN)   | VCC          |              |
 | GND             | GND          | pin 1 (GND)  |
 |                 | A            | pin 3 (D+)   |
 |                 | B            | pin 2 (D−)   |
 
 * The module switches direction by itself, so there is no DE pin (`DE GPIO = -1`). If you use a
   plain MAX485 board instead, wire DE+RE together to a GPIO and set it in the web UI.
+* **Power:** 5 V gives the full RS485 swing (~2–3 V between A and B); 3.3 V also works with less
+  margin on long runs. The ESP's 3.3 V TX is a valid "high" for a 5 V MAX485. At 5 V, never
+  connect the module's TXD to the ESP: ESP32 GPIOs are not 5 V tolerant. If the module's RXD
+  measures ~5 V with the ESP disconnected (pull-up to VCC), power the module from 3V3 instead.
 * TX → RXD is the usual UART crossover: the module's RXD is its input, which it drives onto A/B.
   The firmware only transmits, so the module's TXD (its output) can stay unconnected.
 * An auto-direction module drives "0" bits hard but "1" bits only through its bias resistors. Put
