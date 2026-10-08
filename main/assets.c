@@ -5,35 +5,27 @@
 #include "esp_app_desc.h"
 
 /*
- * Embedded web files. Browsers may cache them but must revalidate (Cache-Control: no-cache);
- * the ETag is derived from the firmware build, so a firmware update invalidates every file
- * and an unchanged one is answered with 304 Not Modified.
+ * Web pages, each one gzipped HTML file with its CSS and JS inlined (built by webpack from
+ * web/src, see web/webpack.config.js). Browsers may cache them but must revalidate
+ * (Cache-Control: no-cache); the ETag is derived from the firmware build, so a firmware
+ * update invalidates every page and an unchanged one is answered with 304 Not Modified.
  */
 #define ASSET(sym)                                                          \
     extern const char sym##_start[] asm("_binary_" #sym "_start");          \
     extern const char sym##_end[] asm("_binary_" #sym "_end");
 
-ASSET(index_html)
-ASSET(index_css)
-ASSET(index_js)
-ASSET(console_html)
-ASSET(console_css)
-ASSET(console_js)
+ASSET(index_html_gz)
+ASSET(console_html_gz)
 
 typedef struct {
     const char *uri;
-    const char *type;
     const char *start;
     const char *end;
 } asset_t;
 
 static const asset_t s_assets[] = {
-    { "/",            "text/html",              index_html_start,   index_html_end },
-    { "/index.css",   "text/css",               index_css_start,    index_css_end },
-    { "/index.js",    "text/javascript",        index_js_start,     index_js_end },
-    { "/console",     "text/html",              console_html_start, console_html_end },
-    { "/console.css", "text/css",               console_css_start,  console_css_end },
-    { "/console.js",  "text/javascript",        console_js_start,   console_js_end },
+    { "/",        index_html_gz_start,   index_html_gz_end },
+    { "/console", console_html_gz_start, console_html_gz_end },
 };
 
 static char s_etag[20];
@@ -49,9 +41,11 @@ static esp_err_t asset_get(httpd_req_t *req)
         httpd_resp_set_status(req, "304 Not Modified");
         return httpd_resp_send(req, NULL, 0);
     }
-    httpd_resp_set_type(req, a->type);
-    // EMBED_TXTFILES appends a NUL terminator
-    return httpd_resp_send(req, a->start, a->end - a->start - 1);
+    // Every browser accepts gzip, so the pages are only stored compressed.
+    httpd_resp_set_type(req, "text/html");
+    httpd_resp_set_hdr(req, "Content-Encoding", "gzip");
+    httpd_resp_set_hdr(req, "Vary", "Accept-Encoding");
+    return httpd_resp_send(req, a->start, a->end - a->start);
 }
 
 esp_err_t assets_register(httpd_handle_t server)

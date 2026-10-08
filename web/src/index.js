@@ -1,3 +1,5 @@
+import './index.css';
+
 const $ = id => document.getElementById(id);
 const fields = ['wifi_ssid','protocol','artnet_universe','sacn_universe','on_loss','loss_timeout_ms',
                 'refresh_hz','name','hostname','tx_pin','de_pin','uart','led_pin'];

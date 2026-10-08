@@ -1,3 +1,5 @@
+import './console.css';
+
 const N = 512;
 const manual = new Uint8Array(N), output = new Uint8Array(N);
 let master = 255, bankSize = 16, bankCh = 0, ws = null, pct = false;
@@ -92,7 +94,7 @@ function bindFader(s) {
 const cur = s => s.isMaster ? master : manual[s.ch];
 
 function render(s) {
-  if (s.ch < 0) return;
+  if (!s.isMaster && s.ch < 0) return;   // empty strip at the end of the last bank
   const v = cur(s);
   s.val.textContent = fmt(v);
   const g = s.track.clientHeight - 20;
@@ -482,7 +484,7 @@ function connect() {
     }
     const d = new Uint8Array(ev.data);
     if (d[0] !== 1 || d.length < 2 + 2 * N) return;
-    const now = performance.now(), fresh = ch => now - (touched.get(ch) || 0) < 400;
+    const now = performance.now(), fresh = ch => now - (touched.get(ch) ?? -1e9) < 400;
     if (!masterStrip.dragging && !fresh(MASTER) && !masterStrip.fl.classList.contains('down')) master = d[1];
     for (let i = 0; i < N; i++) {
       if (!fresh(i)) manual[i] = d[2 + i];

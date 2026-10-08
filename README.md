@@ -85,6 +85,12 @@ idf.py build
 idf.py -p /dev/serial/by-id/usb-Espressif_USB_JTAG_serial_debug_unit_68:B6:B3:47:FF:1C-if00 flash monitor
 ```
 
+The build also needs **Node.js/npm**: CMake runs `npm ci` (first build, or when
+`web/package-lock.json` changes) and `npm run build` in `web/`, which uses webpack to bundle each web
+page with its CSS and JS into one minified, gzipped HTML file that is embedded in the firmware.
+Edit the pages in `web/src/`; `idf.py build` re-bundles them when they change. To look at the
+bundle alone: `cd web && npm ci && npm run build` (output in `web/dist/`).
+
 Default pins, UART, AP password and hostname prefix are under `idf.py menuconfig` → *DMX Bridge*.
 All of them except the AP password can also be changed in the web UI.
 
@@ -187,11 +193,10 @@ JSON API: `GET /api/status`, `GET/POST /api/config`, `GET /api/scan`, `POST /api
 `POST /api/ota` (raw `.bin` as the body, e.g.
 `curl --data-binary @build/dmx_bridge.bin http://dmx-bridge-XXXX.local/api/ota`).
 
-The pages live in `main/web/` as separate HTML, CSS and JS files (`index.*` for the settings
-page, `console.*` for the fader console), embedded into the firmware and served at `/`,
-`/index.css`, `/index.js`, `/console`, `/console.css` and `/console.js` (see `main/assets.c`).
-Browsers revalidate them on every load; the ETag is the firmware build hash, so a firmware
-update always delivers fresh files and an unchanged page reloads with `304 Not Modified`.
+The pages are built from `web/src/` (`index.*` = settings, `console.*` = fader console) into one
+gzipped HTML file each, served at `/` and `/console` with `Content-Encoding: gzip` (see
+`main/assets.c`). Browsers revalidate them on every load; the ETag is the firmware build hash, so
+a firmware update always delivers fresh pages and an unchanged page reloads with `304 Not Modified`.
 
 ## Serial console
 

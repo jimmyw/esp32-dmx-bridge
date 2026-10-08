@@ -3,3 +3,5 @@ managed_components/
 sdkconfig
 sdkconfig.old
 CLAUDE.lock
+web/node_modules/
+web/dist/
