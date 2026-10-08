@@ -7,8 +7,8 @@ receives one universe of Art-Net or sACN and sends it out as DMX512 through an R
 
 | ESP32-S3        | RS485 module | DMX XLR      |
 |-----------------|--------------|--------------|
-| GPIO17 (TX)     | RXD          |              |
-| (unused)        | TXD          |              |
+| GPIO17 (TX)     | TXD          |              |
+| (unused)        | RXD          |              |
 | 5V (VBUS/VIN)   | VCC          |              |
 | GND             | GND          | pin 1 (GND)  |
 |                 | A            | pin 3 (D+)   |
@@ -18,10 +18,12 @@ receives one universe of Art-Net or sACN and sends it out as DMX512 through an R
   plain MAX485 board instead, wire DE+RE together to a GPIO and set it in the web UI.
 * **Power:** 5 V gives the full RS485 swing (~2–3 V between A and B); 3.3 V also works with less
   margin on long runs. The ESP's 3.3 V TX is a valid "high" for a 5 V MAX485. At 5 V, never
-  connect the module's TXD to the ESP: ESP32 GPIOs are not 5 V tolerant. If the module's RXD
-  measures ~5 V with the ESP disconnected (pull-up to VCC), power the module from 3V3 instead.
-* TX → RXD is the usual UART crossover: the module's RXD is its input, which it drives onto A/B.
-  The firmware only transmits, so the module's TXD (its output) can stay unconnected.
+  connect the module's RXD (its output) to the ESP: ESP32 GPIOs are not 5 V tolerant. If the
+  module's TXD input measures ~5 V with the ESP disconnected (pull-up to VCC), power the module
+  from 3V3 instead.
+* This module labels its pins from the MCU's side, so **ESP TX goes to the module's TXD**. That's
+  the input it drives onto A/B, confirmed on a scope. RXD is the module's output back to the MCU.
+  The firmware only transmits, so RXD stays unconnected.
 * An auto-direction module drives "0" bits hard but "1" bits only through its bias resistors. Put
   a 120 Ω terminator on the last fixture. If long cable runs are still unreliable, use a
   DE-controlled MAX485/MAX3485 board.
