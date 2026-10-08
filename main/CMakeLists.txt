@@ -12,7 +12,7 @@ find_program(NPM npm REQUIRED)
 set(web_dir "${PROJECT_DIR}/web")
 set(web_out "${CMAKE_CURRENT_BINARY_DIR}/web")
 set(web_pages index console)
-file(GLOB web_srcs CONFIGURE_DEPENDS "${web_dir}/src/*")
+file(GLOB_RECURSE web_srcs CONFIGURE_DEPENDS "${web_dir}/src/*")
 list(TRANSFORM web_pages APPEND ".html.gz" OUTPUT_VARIABLE web_gz)
 list(TRANSFORM web_gz PREPEND "${web_out}/")
 

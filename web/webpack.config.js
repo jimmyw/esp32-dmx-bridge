@@ -1,5 +1,5 @@
-// Bundles each page (src/<page>.html + .js + .css) into one self-contained, minified HTML file
-// and gzips it: dist/<page>.html.gz is what the firmware embeds and serves.
+// Bundles each page (src/<page>/: <page>.html shell + main.jsx Preact app + CSS) into one
+// self-contained, minified HTML file and gzips it: <page>.html.gz is what the firmware embeds.
 const path = require('path');
 const HtmlWebpackPlugin = require('html-webpack-plugin');
 const MiniCssExtractPlugin = require('mini-css-extract-plugin');
@@ -37,7 +37,7 @@ class InlineAssetsPlugin {
 }
 
 module.exports = (env, argv) => ({
-  entry: Object.fromEntries(PAGES.map(p => [p, `./src/${p}.js`])),
+  entry: Object.fromEntries(PAGES.map(p => [p, `./src/${p}/main.jsx`])),
   output: {
     path: path.resolve(env.outDir || 'dist'),
     filename: '[name].js',
@@ -45,8 +45,17 @@ module.exports = (env, argv) => ({
   },
   devtool: false,
   module: {
-    rules: [{ test: /\.css$/, use: [MiniCssExtractPlugin.loader, 'css-loader'] }],
+    rules: [
+      { test: /\.css$/, use: [MiniCssExtractPlugin.loader, 'css-loader'] },
+      {
+        test: /\.jsx?$/,
+        exclude: /node_modules/,
+        loader: 'esbuild-loader',
+        options: { loader: 'jsx', jsx: 'automatic', jsxImportSource: 'preact', target: 'es2020' },
+      },
+    ],
   },
+  resolve: { extensions: ['.js', '.jsx'] },
   optimization: {
     minimizer: ['...', new CssMinimizerPlugin()],
   },
@@ -54,7 +63,7 @@ module.exports = (env, argv) => ({
   plugins: [
     new MiniCssExtractPlugin({ filename: '[name].css' }),
     ...PAGES.map(p => new HtmlWebpackPlugin({
-      template: `./src/${p}.html`,
+      template: `./src/${p}/${p}.html`,
       filename: `${p}.html`,
       chunks: [p],
       inject: 'body',
