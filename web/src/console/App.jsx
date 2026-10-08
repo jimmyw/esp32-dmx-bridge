@@ -8,7 +8,13 @@ import { Scenes } from './Scenes';
 import { MasterStrip, Strip } from './Strip';
 import { N, clearAll, isConnected, useLive, useLiveEvents } from './live';
 
-const bankSizeFor = w => (w >= 1100 ? 16 : w >= 700 ? 12 : 8);
+// As many strips as fit at least MIN_STRIP px wide (about the phone-size master), up to 16.
+// Mirrors the CSS: 12px desk padding each side, 6px gaps, master 76px (60px up to 560px wide).
+const MIN_STRIP = 58, GAP = 6;
+function bankSizeFor(w) {
+  const strips = w - 24 - (w <= 560 ? 60 : 76) - GAP;
+  return Math.max(1, Math.min(16, Math.floor((strips + GAP) / (MIN_STRIP + GAP))));
+}
 
 export function App() {
   useLive();
