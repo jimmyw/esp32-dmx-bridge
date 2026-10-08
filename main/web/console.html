@@ -58,6 +58,7 @@ button:active{background:var(--line)}
 #scenes button.new{color:var(--mut);border-style:dashed}
 #scenes .empty{color:var(--mut)}
 #fade{width:58px;background:var(--strip);color:var(--fg);border:1px solid var(--line);border-radius:6px;padding:6px;font:inherit}
+#fsBtn.on{background:var(--acc);color:#000}
 #editBtn.on{background:var(--acc);color:#000}
 #editor{display:flex;gap:6px;align-items:center;flex-wrap:wrap;padding:6px 12px;background:#1a1610;border-bottom:1px solid #4a3a20}
 #editor input{flex:1;min-width:140px;background:var(--bg);color:var(--fg);border:1px solid var(--line);border-radius:6px;padding:7px;font:inherit}
@@ -79,6 +80,7 @@ button:active{background:var(--line)}
   <span class="sp"></span>
   <button id="units" title="toggle value display">DMX</button>
   <button id="clear" title="set all console faders to 0">Clear</button>
+  <button id="fsBtn" hidden title="fullscreen (F)" aria-label="toggle fullscreen">⛶ Full</button>
   <a class="btn" href="/">Settings</a>
 </header>
 <div id="scenebar">
@@ -442,6 +444,36 @@ $('editBtn').onclick = () => {
   editMode = !editMode; $('editBtn').classList.toggle('on', editMode);
   if (!editMode) closeEditor(); else renderScenes();
 };
+
+// ---- fullscreen ----
+{
+  const el = document.documentElement;
+  const req = el.requestFullscreen || el.webkitRequestFullscreen;
+  const cur = () => document.fullscreenElement || document.webkitFullscreenElement;
+  const exit = () => (document.exitFullscreen || document.webkitExitFullscreen).call(document);
+  const fsBtn = $('fsBtn');
+  const sync = () => {
+    const on = !!cur();
+    fsBtn.textContent = on ? '⛶ Exit' : '⛶ Full';
+    fsBtn.classList.toggle('on', on);
+  };
+  const toggle = () => {
+    try {
+      const p = cur() ? exit() : req.call(el, {navigationUI: 'hide'});
+      if (p && p.catch) p.catch(() => {});
+    } catch (e) {}
+  };
+  if (req) {                                    // iPhone Safari has no fullscreen API: keep it hidden
+    fsBtn.hidden = false;
+    fsBtn.onclick = toggle;
+    document.addEventListener('fullscreenchange', sync);
+    document.addEventListener('webkitfullscreenchange', sync);
+    document.addEventListener('keydown', e => {
+      if ((e.key === 'f' || e.key === 'F') && !e.ctrlKey && !e.metaKey && !e.altKey &&
+          !/^(INPUT|TEXTAREA)$/.test(e.target.tagName)) toggle();
+    });
+  }
+}
 
 // ---- network ----
 let sendTimer = null, lastSend = 0;
