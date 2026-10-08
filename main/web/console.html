@@ -1,0 +1,255 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover,user-scalable=no">
+<meta name="theme-color" content="#121214">
+<title>DMX Console</title>
+<style>
+:root{--bg:#121214;--panel:#1b1b1f;--strip:#202026;--line:#2e2e36;--fg:#ececf0;--mut:#8a8a96;
+  --cap:#d9d9e0;--acc:#f0a63a;--meter:#4fb3ff;--ok:#3cc47a;--bad:#e06464}
+*{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+html,body{height:100%}
+body{margin:0;background:var(--bg);color:var(--fg);font:14px/1.3 system-ui,-apple-system,Segoe UI,Roboto,sans-serif;
+  display:flex;flex-direction:column;overflow:hidden;user-select:none;-webkit-user-select:none;
+  padding:env(safe-area-inset-top,0) 0 env(safe-area-inset-bottom,0)}
+header{display:flex;align-items:center;gap:8px;flex-wrap:wrap;padding:8px 12px;background:var(--panel);border-bottom:1px solid var(--line)}
+header h1{font-size:16px;margin:0 6px 0 0;font-weight:600}
+.dot{width:9px;height:9px;border-radius:50%;background:var(--bad);display:inline-block}
+.dot.on{background:var(--ok)}
+button,.btn{background:var(--strip);color:var(--fg);border:1px solid var(--line);border-radius:6px;padding:7px 11px;
+  font:inherit;cursor:pointer;text-decoration:none;touch-action:manipulation}
+button:active{background:var(--line)}
+#bank{font-variant-numeric:tabular-nums;min-width:92px;text-align:center}
+.sp{flex:1}
+#desk{flex:1;display:flex;gap:6px;padding:10px 12px;min-height:0}
+#strips{flex:1;display:grid;gap:6px;min-width:0}
+.strip{background:var(--strip);border:1px solid var(--line);border-radius:8px;display:flex;flex-direction:column;
+  align-items:center;padding:6px 3px;min-width:0;min-height:0}
+.strip.master{flex:0 0 76px;border-color:#4a3a20}
+.val{font-variant-numeric:tabular-nums;font-size:13px;height:18px;color:var(--acc)}
+.track{flex:1;width:100%;position:relative;touch-action:none;cursor:ns-resize;margin:6px 0;min-height:80px}
+.slot{position:absolute;left:50%;top:10px;bottom:10px;width:6px;margin-left:-3px;background:#0b0b0d;border-radius:3px}
+.meter{position:absolute;left:calc(50% + 9px);bottom:10px;width:4px;background:var(--meter);border-radius:2px;opacity:.85}
+.fill{position:absolute;left:50%;bottom:10px;width:6px;margin-left:-3px;background:var(--acc);border-radius:3px;opacity:.5}
+.cap{position:absolute;left:50%;width:min(44px,90%);height:20px;margin:-10px 0 0 calc(min(44px,90%) / -2);
+  background:linear-gradient(#f4f4f8,#b9b9c2);border-radius:4px;box-shadow:0 2px 4px #0008;pointer-events:none}
+.cap::after{content:"";position:absolute;left:4px;right:4px;top:9px;height:2px;background:#333}
+.master .cap{background:linear-gradient(#ffd38a,#d08a20)}
+.ch{font-size:12px;color:var(--mut);font-variant-numeric:tabular-nums}
+.btns{display:flex;flex-direction:column;gap:4px;width:100%;margin-top:6px}
+.btns button{padding:6px 0;font-size:12px;width:100%}
+.btns button.fl:active,.btns button.fl.down{background:var(--acc);color:#000}
+#jump{width:70px;background:var(--strip);color:var(--fg);border:1px solid var(--line);border-radius:6px;padding:6px;font:inherit}
+@media (max-width:560px){header h1{display:none}.strip.master{flex-basis:60px}}
+</style>
+</head>
+<body>
+<header>
+  <h1>DMX Console</h1>
+  <span class="dot" id="conn" title="connection"></span>
+  <button id="prev" aria-label="previous bank">◀</button>
+  <span id="bank">Ch 1–16</span>
+  <button id="next" aria-label="next bank">▶</button>
+  <input id="jump" type="number" min="1" max="512" placeholder="Ch #" aria-label="jump to channel">
+  <span class="sp"></span>
+  <button id="units" title="toggle value display">DMX</button>
+  <button id="clear" title="set all console faders to 0">Clear</button>
+  <a class="btn" href="/">Settings</a>
+</header>
+<div id="desk">
+  <div id="strips"></div>
+  <div class="strip master" id="masterStrip"></div>
+</div>
+
+<script>
+const N = 512;
+const manual = new Uint8Array(N), output = new Uint8Array(N);
+let master = 255, bankSize = 16, bankStart = 0, ws = null, pct = false;
+const touched = new Map();          // ch -> timestamp of last local change (ignore echoes briefly)
+const pending = new Map();          // ch -> value to send
+const MASTER = 0xFFFF;
+const strips = [];                  // visible strip objects
+
+try { pct = localStorage.getItem('pct') === '1'; bankStart = +localStorage.getItem('bank') || 0; } catch (e) {}
+
+const fmt = v => pct ? Math.round(v / 2.55) + '%' : String(v);
+
+function makeStrip(parent, isMaster) {
+  const el = document.createElement('div');
+  if (!isMaster) el.className = 'strip';
+  el.innerHTML = `<div class="val"></div>
+    <div class="track"><div class="slot"></div><div class="fill"></div><div class="meter"></div><div class="cap"></div></div>
+    <div class="ch"></div>
+    <div class="btns"><button class="fl">${isMaster ? 'DBO' : 'Flash'}</button><button class="zero">${isMaster ? 'Full' : '0'}</button></div>`;
+  if (isMaster) { parent.append(...el.childNodes); } else { parent.appendChild(el); }
+  const root = isMaster ? parent : el;
+  const s = {
+    root, ch: -1, value: 0, flash: false, dragging: false,
+    val: root.querySelector('.val'), track: root.querySelector('.track'), cap: root.querySelector('.cap'),
+    fill: root.querySelector('.fill'), meter: root.querySelector('.meter'), label: root.querySelector('.ch'),
+    fl: root.querySelector('.fl'), zero: root.querySelector('.zero'), isMaster,
+  };
+  bindFader(s);
+  return s;
+}
+
+function geom(s) {
+  const r = s.track.getBoundingClientRect();
+  return { top: r.top + 10, h: Math.max(1, r.height - 20) };
+}
+
+function setLocal(s, v) {
+  v = Math.max(0, Math.min(255, Math.round(v)));
+  const ch = s.isMaster ? MASTER : s.ch;
+  if (s.isMaster) master = v; else manual[s.ch] = v;
+  touched.set(ch, performance.now());
+  pending.set(ch, v);
+  render(s);
+  scheduleSend();
+}
+
+function bindFader(s) {
+  let offset = 0;
+  const fromY = y => { const g = geom(s); return (1 - (y - offset - g.top) / g.h) * 255; };
+  s.track.addEventListener('pointerdown', e => {
+    s.track.setPointerCapture(e.pointerId);
+    s.dragging = true;
+    const g = geom(s), capY = g.top + (1 - cur(s) / 255) * g.h;
+    offset = Math.abs(e.clientY - capY) < 16 ? e.clientY - capY : 0;   // grab cap = relative, else jump
+    setLocal(s, fromY(e.clientY));
+  });
+  s.track.addEventListener('pointermove', e => { if (s.dragging) setLocal(s, fromY(e.clientY)); });
+  const end = () => { s.dragging = false; };
+  s.track.addEventListener('pointerup', end);
+  s.track.addEventListener('pointercancel', end);
+  s.track.addEventListener('wheel', e => {
+    e.preventDefault();
+    setLocal(s, cur(s) + (e.deltaY < 0 ? 1 : -1) * (e.shiftKey ? 10 : 1));
+  }, { passive: false });
+
+  // Flash (strip) / DBO (master): momentary
+  const down = e => {
+    e.preventDefault(); s.fl.classList.add('down');
+    if (s.isMaster) { s.saved = master; setLocal(s, 0); }
+    else { s.saved = manual[s.ch]; setLocal(s, 255); }
+  };
+  const up = () => {
+    if (!s.fl.classList.contains('down')) return;
+    s.fl.classList.remove('down'); setLocal(s, s.saved);
+  };
+  s.fl.addEventListener('pointerdown', down);
+  s.fl.addEventListener('pointerup', up);
+  s.fl.addEventListener('pointerleave', up);
+  s.fl.addEventListener('pointercancel', up);
+  s.zero.addEventListener('click', () => setLocal(s, s.isMaster ? 255 : 0));
+}
+
+const cur = s => s.isMaster ? master : manual[s.ch];
+
+function render(s) {
+  const v = cur(s);
+  s.val.textContent = fmt(v);
+  const g = s.track.clientHeight - 20;
+  s.cap.style.top = (10 + (1 - v / 255) * g) + 'px';
+  s.fill.style.height = (v / 255 * g) + 'px';
+  if (!s.isMaster) s.meter.style.height = (output[s.ch] / 255 * g) + 'px';
+}
+
+const masterStrip = makeStrip(document.getElementById('masterStrip'), true);
+masterStrip.label.textContent = 'Master';
+masterStrip.meter.style.display = 'none';
+
+function layout() {
+  const w = window.innerWidth;
+  const size = w >= 1100 ? 16 : w >= 700 ? 12 : 8;
+  if (size !== bankSize || strips.length === 0) {
+    bankSize = size;
+    const box = document.getElementById('strips');
+    box.innerHTML = ''; strips.length = 0;
+    box.style.gridTemplateColumns = `repeat(${size}, minmax(0,1fr))`;
+    for (let i = 0; i < size; i++) strips.push(makeStrip(box, false));
+  }
+  bankStart = Math.min(Math.floor(bankStart / bankSize) * bankSize, N - bankSize);
+  strips.forEach((s, i) => { s.ch = bankStart + i; s.label.textContent = s.ch + 1; });
+  document.getElementById('bank').textContent = `Ch ${bankStart + 1}–${bankStart + bankSize}`;
+  try { localStorage.setItem('bank', bankStart); } catch (e) {}
+  renderAll();
+}
+
+function renderAll() { strips.forEach(render); render(masterStrip); }
+
+function go(delta) { bankStart = Math.max(0, Math.min(N - bankSize, bankStart + delta * bankSize)); layout(); }
+document.getElementById('prev').onclick = () => go(-1);
+document.getElementById('next').onclick = () => go(1);
+document.getElementById('jump').addEventListener('change', e => {
+  const c = Math.max(1, Math.min(N, +e.target.value || 1)) - 1;
+  bankStart = Math.floor(c / bankSize) * bankSize; e.target.value = ''; layout();
+});
+document.getElementById('units').onclick = e => {
+  pct = !pct; e.target.textContent = pct ? '%' : 'DMX';
+  try { localStorage.setItem('pct', pct ? '1' : '0'); } catch (err) {}
+  renderAll();
+};
+document.getElementById('units').textContent = pct ? '%' : 'DMX';
+
+let clearArmed = 0;
+document.getElementById('clear').onclick = e => {
+  if (performance.now() - clearArmed > 2500) { clearArmed = performance.now(); e.target.textContent = 'Sure?';
+    setTimeout(() => e.target.textContent = 'Clear', 2500); return; }
+  clearArmed = 0; e.target.textContent = 'Clear';
+  manual.fill(0); touched.clear(); pending.clear();
+  for (let i = 0; i < N; i++) touched.set(i, performance.now());
+  if (ws && ws.readyState === 1) ws.send('clear');
+  renderAll();
+};
+
+window.addEventListener('keydown', e => {
+  if (e.target.tagName === 'INPUT') return;
+  if (e.key === 'ArrowLeft' || e.key === 'PageUp') go(-1);
+  if (e.key === 'ArrowRight' || e.key === 'PageDown') go(1);
+});
+
+// ---- network ----
+let sendTimer = null, lastSend = 0;
+function scheduleSend() {
+  if (sendTimer) return;
+  const wait = Math.max(0, 25 - (performance.now() - lastSend));
+  sendTimer = setTimeout(flush, wait);
+}
+function flush() {
+  sendTimer = null;
+  if (!ws || ws.readyState !== 1 || pending.size === 0) return;
+  const buf = new Uint8Array(pending.size * 3);
+  let i = 0;
+  for (const [ch, v] of pending) { buf[i++] = ch >> 8; buf[i++] = ch & 255; buf[i++] = v; }
+  pending.clear();
+  ws.send(buf);
+  lastSend = performance.now();
+}
+
+function connect() {
+  ws = new WebSocket(`ws://${location.host}/ws`);
+  ws.binaryType = 'arraybuffer';
+  ws.onopen = () => { document.getElementById('conn').className = 'dot on'; flush(); };
+  ws.onclose = () => { document.getElementById('conn').className = 'dot'; setTimeout(connect, 1500); };
+  ws.onerror = () => ws.close();
+  ws.onmessage = ev => {
+    const d = new Uint8Array(ev.data);
+    if (d[0] !== 1 || d.length < 2 + 2 * N) return;
+    const now = performance.now(), fresh = ch => now - (touched.get(ch) || 0) < 400;
+    if (!masterStrip.dragging && !fresh(MASTER) && !masterStrip.fl.classList.contains('down')) master = d[1];
+    for (let i = 0; i < N; i++) {
+      if (!fresh(i)) manual[i] = d[2 + i];
+      output[i] = d[2 + N + i];
+    }
+    renderAll();
+  };
+}
+
+window.addEventListener('resize', layout);
+layout();
+connect();
+</script>
+</body>
+</html>

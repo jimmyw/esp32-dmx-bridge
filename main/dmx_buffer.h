@@ -37,6 +37,13 @@ void dmx_buffer_reset_sources(void);
 // Called by the DMX transmitter: runs merge/expiry and copies the 512 output slots.
 void dmx_buffer_get_output(uint8_t out[DMX_SLOTS]);
 
+// Manual layer (web console faders): merged highest-takes-precedence over the network input,
+// scaled by its own master. Never times out.
+void dmx_buffer_set_manual(uint16_t ch, uint8_t value);   // ch 0..511
+void dmx_buffer_set_manual_master(uint8_t master);
+void dmx_buffer_clear_manual(void);
+void dmx_buffer_get_manual(uint8_t out[DMX_SLOTS], uint8_t *master);
+
 void dmx_buffer_count_frame(void);
 void dmx_buffer_get_stats(dmx_stats_t *stats);
-void dmx_buffer_peek(uint8_t *out, uint16_t n);   // first n output slots, for the web UI
+void dmx_buffer_peek(uint8_t *out, uint16_t n);   // first n final output slots (after merge)

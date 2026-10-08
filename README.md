@@ -85,6 +85,22 @@ restarts. See [Serial console](#serial-console).
 Both protocols are accepted by default. If both arrive at once, the higher sACN priority wins;
 Art-Net counts as priority 100.
 
+## Fader console (`/console`)
+
+A lighting-desk style page at `http://dmx-bridge-XXXX.local/console` (button on the main page):
+
+* Fader strips with value readout, an output meter (what really goes out, QLC+ included),
+  **Flash** (momentary full) and **0**. 8/12/16 faders per bank depending on screen width; page with
+  ◀ ▶, arrow keys, or jump to a channel number. Mouse wheel = fine adjust (Shift = ×10).
+* **Master** fader scales all console faders. **DBO** is a momentary dead blackout of the console
+  layer, and **Full** sets the master back to 100%. **Clear** (tap twice) zeroes all console faders.
+* Console faders are merged **HTP** (highest takes precedence) with the Art-Net/sACN input, like a
+  desk's manual layer. They never time out, so a channel you push up stays up until you pull it
+  down, even when QLC+ stops.
+* Several phones/tablets can be open at once. A WebSocket (`/ws`) keeps them in sync, at about
+  15 updates/s.
+* Values can show as DMX (0–255) or %. The chosen bank and units are remembered per browser.
+
 ## Web UI
 
 * **Status:** Wi-Fi, IP, active source, packets/s, DMX frames/s and a live view of all 512

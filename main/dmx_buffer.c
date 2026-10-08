@@ -20,7 +20,10 @@ typedef struct {
 
 static SemaphoreHandle_t s_lock;
 static source_t s_sources[MAX_SOURCES];
-static uint8_t s_output[DMX_SLOTS];
+static uint8_t s_output[DMX_SLOTS];   // network layer (kept for "hold last look")
+static uint8_t s_final[DMX_SLOTS];    // network merged with the manual layer
+static uint8_t s_manual[DMX_SLOTS];
+static uint8_t s_manual_master = 255;
 static dmx_stats_t s_stats;
 
 void dmx_buffer_init(void)
@@ -139,7 +142,11 @@ void dmx_buffer_get_output(uint8_t out[DMX_SLOTS])
     }
     s_stats.num_sources = live;
     s_stats.signal = best != NULL;
-    memcpy(out, s_output, DMX_SLOTS);
+    for (int i = 0; i < DMX_SLOTS; i++) {
+        uint8_t m = (uint8_t)((s_manual[i] * s_manual_master + 127) / 255);
+        s_final[i] = m > s_output[i] ? m : s_output[i];
+    }
+    memcpy(out, s_final, DMX_SLOTS);
     xSemaphoreGive(s_lock);
 }
 
@@ -161,6 +168,33 @@ void dmx_buffer_peek(uint8_t *out, uint16_t n)
         n = DMX_SLOTS;
     }
     xSemaphoreTake(s_lock, portMAX_DELAY);
-    memcpy(out, s_output, n);
+    memcpy(out, s_final, n);
+    xSemaphoreGive(s_lock);
+}
+
+void dmx_buffer_set_manual(uint16_t ch, uint8_t value)
+{
+    if (ch < DMX_SLOTS) {
+        s_manual[ch] = value;   // single byte store, read by the merge under the lock
+    }
+}
+
+void dmx_buffer_set_manual_master(uint8_t master)
+{
+    s_manual_master = master;
+}
+
+void dmx_buffer_clear_manual(void)
+{
+    xSemaphoreTake(s_lock, portMAX_DELAY);
+    memset(s_manual, 0, sizeof(s_manual));
+    xSemaphoreGive(s_lock);
+}
+
+void dmx_buffer_get_manual(uint8_t out[DMX_SLOTS], uint8_t *master)
+{
+    xSemaphoreTake(s_lock, portMAX_DELAY);
+    memcpy(out, s_manual, DMX_SLOTS);
+    *master = s_manual_master;
     xSemaphoreGive(s_lock);
 }

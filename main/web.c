@@ -5,6 +5,7 @@
 #include <string.h>
 #include "cJSON.h"
 #include "config.h"
+#include "console.h"
 #include "dmx_buffer.h"
 #include "esp_app_desc.h"
 #include "esp_http_server.h"
@@ -401,7 +402,8 @@ static esp_err_t redirect_get(httpd_req_t *req)
 esp_err_t web_start(void)
 {
     httpd_config_t cfg = HTTPD_DEFAULT_CONFIG();
-    cfg.max_uri_handlers = 12;
+    cfg.max_uri_handlers = 16;
+    cfg.max_open_sockets = 10;
     cfg.stack_size = 8192;
     cfg.lru_purge_enable = true;
     cfg.uri_match_fn = httpd_uri_match_wildcard;
@@ -425,9 +427,12 @@ esp_err_t web_start(void)
         { .uri = "/api/ota",           .method = HTTP_POST, .handler = ota_post },
         { .uri = "/*",                 .method = HTTP_GET,  .handler = redirect_get },
     };
-    for (size_t i = 0; i < sizeof(uris) / sizeof(uris[0]); i++) {
+    const size_t n = sizeof(uris) / sizeof(uris[0]);
+    for (size_t i = 0; i < n - 1; i++) {
         httpd_register_uri_handler(server, &uris[i]);
     }
+    console_register(server);
+    httpd_register_uri_handler(server, &uris[n - 1]);   // "/*" catch-all last
     ESP_LOGI(TAG, "web UI on port 80");
     return ESP_OK;
 }
