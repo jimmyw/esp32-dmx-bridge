@@ -76,7 +76,9 @@ about +2 V and needs no bias resistors.
 
 ## Build & flash
 
-Built with ESP-IDF v6.2 for a 16 MB flash ESP32-S3 (2 × 4 MB OTA app slots + 8 MB spare data partition) (`~/esp/esp-idf`):
+Built with ESP-IDF v6.2 for a 16 MB flash ESP32-S3 (`~/esp/esp-idf`). Partitions (`partitions.csv`):
+2 × 4 MB OTA app slots, `storage` (4 MB raw: channel names and scenes), `www` (1 MB SPIFFS: the web
+pages); the last ~3 MB are unused.
 
 ```bash
 . ~/esp/esp-idf/export.sh
@@ -85,14 +87,20 @@ idf.py build
 idf.py -p /dev/serial/by-id/usb-Espressif_USB_JTAG_serial_debug_unit_68:B6:B3:47:FF:1C-if00 flash monitor
 ```
 
+`idf.py flash` writes the bootloader, partition table, app and the `www` image; it never touches
+`nvs` (settings) or `storage` (names, scenes). A change to `partitions.csv` needs this USB flash —
+over-the-air updates can't change the partition table.
+
 The build also needs **Node.js/npm**: CMake runs `npm ci` (first build, or when
 `web/package-lock.json` changes) and `npm run build` in `web/`, which uses webpack to bundle each web
-page with its CSS and JS into one minified, gzipped HTML file that is embedded in the firmware.
+page with its CSS and JS into one minified, gzipped HTML file. The pages go into the `www` image
+(`build/www.bin`), into the package `build/dmx_bridge_www.tar`, and into the firmware itself as a
+fallback copy.
 The pages are small [Preact](https://preactjs.com) apps written in JSX (compiled by esbuild-loader):
 `web/src/index/` is the settings page, `web/src/console/` the fader console (`live.js` holds the
 WebSocket connection and the 512-channel state), `web/src/common/` shared helpers. Edit them
-there; `idf.py build` re-bundles them when they change. To look at the
-bundle alone: `cd web && npm ci && npm run build` (output in `web/dist/`).
+there; `idf.py build` re-bundles them when they change. To build only the web UI:
+`cd web && npm ci && npm run build` (output in `web/dist/`: `www/` and `dmx_bridge_www.tar`).
 
 Default pins, UART, AP password and hostname prefix are under `idf.py menuconfig` → *DMX Bridge*.
 All of them except the AP password can also be changed in the web UI.
@@ -190,16 +198,33 @@ A lighting-desk style page at `http://dmx-bridge-XXXX.local/console` (button on 
 * **Firmware:** upload a new `build/dmx_bridge.bin` from the browser. It is written to the
   inactive OTA slot, verified, and booted. If the new firmware crashes before it finishes
   starting, the bootloader rolls back to the previous one on the next reset.
+  The same card takes **`dmx_bridge_www.tar`** (from `build/` or `web/dist/`) to update only the
+  web pages, without a restart; see *Web pages* below.
 
 JSON API: `GET /api/status`, `GET/POST /api/config`, `GET /api/scan`, `POST /api/reboot`,
 `POST /api/factory_reset`,
 `POST /api/ota` (raw `.bin` as the body, e.g.
-`curl --data-binary @build/dmx_bridge.bin http://dmx-bridge-XXXX.local/api/ota`).
+`curl --data-binary @build/dmx_bridge.bin http://dmx-bridge-XXXX.local/api/ota`),
+`POST /api/www` (web package `.tar` as the body).
+
+### Web pages
 
 The pages are built from `web/src/` (`index/` = settings, `console/` = fader console) into one
 gzipped HTML file each, served at `/` and `/console` with `Content-Encoding: gzip` (see
-`main/assets.c`). Browsers revalidate them on every load; the ETag is the firmware build hash, so
-a firmware update always delivers fresh pages and an unchanged page reloads with `304 Not Modified`.
+`main/assets.c`). They live on the `www` SPIFFS partition, and the firmware carries the copies it
+was built with:
+
+* **Web-only update:** upload `dmx_bridge_www.tar` (a plain tar of `index.html.gz`,
+  `console.html.gz` and `manifest.json`). The bridge unpacks it to temporary files and only swaps
+  them in once the whole archive arrived and checked out, so a broken upload leaves the old pages
+  in place.
+* **Newest wins:** each set has a build time in its `manifest.json`. The bridge serves whichever is
+  newer — an uploaded package, or the pages inside the running firmware — so a firmware update
+  brings its own newer UI, and a package older than the firmware's pages is refused.
+* **Recovery:** `/?builtin` (and `/console?builtin`) always serves the firmware's own copy, e.g. if
+  an uploaded UI is broken.
+* The settings page's Firmware card shows which web UI is running. Browsers revalidate pages on
+  every load (ETag from the package / firmware build), so an update shows up on the next reload.
 
 ## Serial console
 

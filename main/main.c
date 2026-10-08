@@ -1,4 +1,5 @@
 #include "artnet.h"
+#include "assets.h"
 #include "cli.h"
 #include "config.h"
 #include "dmx_buffer.h"
@@ -98,6 +99,7 @@ void app_main(void)
     ESP_ERROR_CHECK(wifi_mgr_start());
     ESP_ERROR_CHECK(artnet_start());
     ESP_ERROR_CHECK(sacn_start());
+    assets_init();   // web pages partition; built-in pages are used without it
     ESP_ERROR_CHECK(web_start());
     xTaskCreate(ui_task, "ui", 3072, NULL, 3, NULL);
     ESP_ERROR_CHECK(cli_start());

@@ -95,6 +95,7 @@ static esp_err_t status_get(httpd_req_t *req)
     cJSON_AddNumberToObject(r, "heap", esp_get_free_heap_size());
     const esp_partition_t *running = esp_ota_get_running_partition();
     cJSON_AddStringToObject(r, "partition", running ? running->label : "");
+    assets_add_status(r);
 
     cJSON *w = cJSON_AddObjectToObject(r, "wifi");
     cJSON_AddBoolToObject(w, "sta", wifi_mgr_sta_connected());

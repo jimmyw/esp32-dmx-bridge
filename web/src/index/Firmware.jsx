@@ -1,6 +1,18 @@
 import { useRef, useState } from 'preact/hooks';
 
-// Firmware upload: POSTs the raw .bin to /api/ota with progress, then reloads after the restart.
+// What the bridge serves the web pages from, e.g. "web UI 1.0.0 (a58dd5f, 2026-10-08)".
+function webInfo(w) {
+  if (!w) return '';
+  if (w.source !== 'package') return 'web UI built into the firmware';
+  const extra = [w.git, w.built && w.built.slice(0, 10)].filter(Boolean).join(', ');
+  return `web UI ${w.version || '?'}` + (extra ? ` (${extra})` : '');
+}
+
+/*
+ * Upload either file from the build directory:
+ *   dmx_bridge.bin       firmware -> /api/ota, the bridge restarts into it
+ *   dmx_bridge_www.tar   web UI only -> /api/www, installed without a restart
+ */
 export function Firmware({ status }) {
   const file = useRef();
   const [busy, setBusy] = useState(false);
@@ -10,10 +22,11 @@ export function Firmware({ status }) {
 
   const upload = () => {
     const f = file.current.files[0];
-    if (!f) return say('Choose a .bin file first', true);
-    if (!f.name.endsWith('.bin')) return say('Expected a .bin firmware file', true);
+    if (!f) return say('Choose a file first', true);
+    const web = f.name.endsWith('.tar');
+    if (!web && !f.name.endsWith('.bin')) return say('Expected dmx_bridge.bin or dmx_bridge_www.tar', true);
     const x = new XMLHttpRequest();
-    x.open('POST', '/api/ota');
+    x.open('POST', web ? '/api/www' : '/api/ota');
     x.setRequestHeader('Content-Type', 'application/octet-stream');
     x.upload.onprogress = e => {
       if (!e.lengthComputable) return;
@@ -25,7 +38,10 @@ export function Firmware({ status }) {
       setBusy(false);
       let r = {};
       try { r = JSON.parse(x.responseText); } catch (e) {}
-      if (x.status === 200 && r.ok) {
+      if (x.status === 200 && r.ok && web) {
+        say(`Web UI installed (${r.files} files) – reloading…`);
+        setTimeout(() => location.reload(), 1500);
+      } else if (x.status === 200 && r.ok) {
         say('Installed – restarting…');
         setTimeout(() => location.reload(), 10000);
       } else {
@@ -44,18 +60,20 @@ export function Firmware({ status }) {
     <section class="card">
       <h2>Firmware</h2>
       <div class="hint" style={{ marginBottom: '8px' }}>
-        {status ? `Running v${status.fw} from partition ${status.partition}` : ''}
+        {status ? `Running v${status.fw} from partition ${status.partition} · ${webInfo(status.web)}` : ''}
       </div>
       <div class="row" style={{ marginBottom: '6px' }}>
-        <div><input ref={file} type="file" accept=".bin,application/octet-stream" /></div>
+        <div><input ref={file} type="file" accept=".bin,.tar,application/octet-stream,application/x-tar" /></div>
       </div>
       <div class="actions">
         <button type="button" class="sec" disabled={busy} onClick={upload}>Upload &amp; install</button>
         {progress !== null && <progress max="100" value={progress} style={{ flex: 1, minWidth: '120px' }} />}
         <span class="hint" style={{ color: msg.bad ? 'var(--bad)' : '' }}>{msg.text}</span>
       </div>
-      <div class="hint">Select <code>build/dmx_bridge.bin</code>. The bridge restarts into the new firmware and
-        rolls back automatically if it fails to start. DMX output may stutter during the upload.</div>
+      <div class="hint">Select <code>build/dmx_bridge.bin</code> to update the firmware: the bridge restarts
+        into it and rolls back automatically if it fails to start. Or select <code>build/dmx_bridge_www.tar</code>
+        to update only the web pages, without a restart. DMX output may stutter during an upload.
+        If an uploaded web UI breaks, open <a href="/?builtin">/?builtin</a> for the firmware's own copy.</div>
     </section>
   );
 }
