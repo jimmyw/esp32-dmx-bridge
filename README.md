@@ -187,6 +187,12 @@ JSON API: `GET /api/status`, `GET/POST /api/config`, `GET /api/scan`, `POST /api
 `POST /api/ota` (raw `.bin` as the body, e.g.
 `curl --data-binary @build/dmx_bridge.bin http://dmx-bridge-XXXX.local/api/ota`).
 
+The pages live in `main/web/` as separate HTML, CSS and JS files (`index.*` for the settings
+page, `console.*` for the fader console), embedded into the firmware and served at `/`,
+`/index.css`, `/index.js`, `/console`, `/console.css` and `/console.js` (see `main/assets.c`).
+Browsers revalidate them on every load; the ETag is the firmware build hash, so a firmware
+update always delivers fresh files and an unchanged page reloads with `304 Not Modified`.
+
 ## Serial console
 
 The USB-Serial/JTAG port carries the log and a command line (`dmx>` prompt):
