@@ -8,7 +8,8 @@ import { useLiveEvents } from './live';
  * Scene bar (recall, + Save, Update / Delete for the active scene, Edit mode) and the scene
  * editor row. Scenes are stored on the bridge: /api/scenes.
  */
-export function Scenes() {
+// Stays mounted while the toolbar is hidden, so keys 1-9 still recall scenes.
+export function Scenes({ visible }) {
   const [list, setList] = useState({ scenes: [], count: 64, active: 0, fading: false });
   const [fade, setFade] = usePersisted('fade', 0);
   const [editMode, setEditMode] = useState(false);
@@ -67,6 +68,8 @@ export function Scenes() {
       if (sc) recall(sc.id);
     }
   });
+
+  if (!visible) return null;
 
   let buttons;
   if (editMode) {

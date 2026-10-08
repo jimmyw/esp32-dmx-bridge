@@ -61,6 +61,7 @@ button:disabled{opacity:.5;cursor:default}
 .strip.blank{visibility:hidden}
 .strip.hid{opacity:.45}
 .strip.hid .nm{border-style:dashed}
+#scnBtn.on{background:var(--acc);color:#000}
 #hidBtn.on{background:var(--acc);color:#000}
 #chback{position:fixed;inset:0;z-index:9}
 #chmenu{position:fixed;z-index:10;width:230px;background:var(--panel);border:1px solid var(--acc);border-radius:8px;

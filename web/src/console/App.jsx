@@ -21,6 +21,7 @@ export function App() {
   const [pct, setPct] = usePersisted('pct', false);
   const [bankCh, setBankCh] = usePersisted('bank', 0);
   const [showHidden, setShowHidden] = usePersisted('showHidden', false);
+  const [showScenes, setShowScenes] = usePersisted('showScenes', true);
   const [bankSize, setBankSize] = useState(() => bankSizeFor(innerWidth));
   // Channel names (0-based ch -> name) and explicitly hidden channels, stored on the bridge.
   const [names, setNames] = useState({});
@@ -134,12 +135,14 @@ export function App() {
             Hidden {hiddenCount}
           </button>
         )}
+        <button id="scnBtn" class={showScenes ? 'on' : ''} onClick={() => setShowScenes(!showScenes)}
+                title={showScenes ? 'hide the scenes toolbar' : 'show the scenes toolbar'}>Scenes</button>
         <button title="toggle value display" onClick={() => setPct(!pct)}>{pct ? '%' : 'DMX'}</button>
         <button title="set all console faders to 0" onClick={clear}>{clearArmed ? 'Sure?' : 'Clear'}</button>
         <FullscreenButton />
         <a class="btn" href="/">Settings</a>
       </header>
-      <Scenes />
+      <Scenes visible={showScenes} />
       {menuCh >= 0 && (
         <ChannelMenu key={menuCh} ch={menuCh} names={names} hidden={hidden} nameMax={nameMax}
                      onApply={applyMenu} onClose={() => setMenuCh(-1)} onTab={tabMenu} />
