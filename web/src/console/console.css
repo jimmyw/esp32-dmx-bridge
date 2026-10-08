@@ -47,7 +47,7 @@ button:disabled{opacity:.5;cursor:default}
 #scenes button.fading{animation:pulse .6s ease-in-out infinite alternate}
 @keyframes pulse{from{background:var(--strip)}to{background:#4a3a20}}
 #scenes button.new{color:var(--mut);border-style:dashed}
-#scenes .empty{color:var(--mut)}
+#scenes button.empty{color:var(--mut)}
 #fade{width:58px;background:var(--strip);color:var(--fg);border:1px solid var(--line);border-radius:6px;padding:6px;font:inherit}
 #fsBtn.on{background:var(--acc);color:#000}
 #editBtn.on{background:var(--acc);color:#000}
@@ -61,6 +61,8 @@ button:disabled{opacity:.5;cursor:default}
 .strip.hid{opacity:.45}
 .strip.hid .nm{border-style:dashed}
 #scnBtn.on,#pctBtn.on{background:var(--acc);color:#000}
+#hidBtn{display:inline-flex;align-items:center;gap:3px;padding:7px 8px}
+#hidBtn small{font-size:11px;font-variant-numeric:tabular-nums}
 #hidBtn.on{background:var(--acc);color:#000}
 #chback{position:fixed;inset:0;z-index:9}
 #chmenu{position:fixed;z-index:10;width:230px;background:var(--panel);border:1px solid var(--acc);border-radius:8px;

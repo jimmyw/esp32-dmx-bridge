@@ -8,6 +8,16 @@ import { Scenes } from './Scenes';
 import { MasterStrip, Strip } from './Strip';
 import { N, clearAll, isConnected, useLive, useLiveEvents } from './live';
 
+// "Hidden channels" icon: an eye, struck through.
+const EyeOff = () => (
+  <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2"
+       stroke-linecap="round" aria-hidden="true">
+    <path d="M2 12s3.6-7 10-7 10 7 10 7-3.6 7-10 7S2 12 2 12z" />
+    <circle cx="12" cy="12" r="3" />
+    <path d="M4 20 20 4" />
+  </svg>
+);
+
 // As many strips as fit at least MIN_STRIP px wide (about the phone-size master), up to 16.
 // Mirrors the CSS: 12px desk padding each side, 6px gaps, master 76px (60px up to 560px wide).
 const MIN_STRIP = 58, GAP = 6;
@@ -123,8 +133,10 @@ export function App() {
         <span class="sp" />
         {hiddenCount > 0 && (
           <button id="hidBtn" class={showHidden ? 'on' : ''} onClick={() => setShowHidden(!showHidden)}
-                  title={showHidden ? 'showing hidden channels (dimmed) – tap to hide them' : 'show hidden channels'}>
-            Hidden {hiddenCount}
+                  aria-label={`${hiddenCount} hidden channels`}
+                  title={`${hiddenCount} hidden channels – ` +
+                         (showHidden ? 'showing them dimmed, tap to hide them' : 'tap to show them')}>
+            <EyeOff /><small>{hiddenCount}</small>
           </button>
         )}
         <button id="scnBtn" class={showScenes ? 'on' : ''} onClick={() => setShowScenes(!showScenes)}

@@ -92,7 +92,6 @@ export function Scenes({ visible }) {
       <button key="new" class="new" title="save the current console faders as a new scene"
               onClick={saveNew}>+ Save</button>,
     );
-    if (!scenes.length) buttons.push(<span key="hint" class="empty">Set faders, then + Save</span>);
   }
 
   return (

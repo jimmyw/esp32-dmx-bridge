@@ -160,7 +160,7 @@ A lighting-desk style page at `http://dmx-bridge-XXXX.local/console` (button on 
   Once any channel has a name, **unnamed channels are hidden**, so the console shows just your
   fixtures' channels; naming a channel shows it. Named channels can be hidden from the menu too.
   Hidden channels are skipped when paging through banks; their DMX values are unchanged. A
-  **Hidden n** button in the top bar shows them (dimmed) so you can name or **Show channel
+  hidden-channels button in the top bar (crossed-out eye and count) shows them (dimmed) so you can name or **Show channel
   again**.
   Names and hidden flags are stored on the bridge, in the `storage` partition as two alternating
   copies so a power cut can't corrupt them. They're shared by every device and update live on all
