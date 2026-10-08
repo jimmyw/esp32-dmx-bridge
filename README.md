@@ -146,8 +146,8 @@ Art-Net counts as priority 100.
 A lighting-desk style page at `http://dmx-bridge-XXXX.local/console` (button on the main page):
 
 * Fader strips with value readout, an output meter (what really goes out, QLC+ included),
-  **Flash** (momentary full) and **0**. 8/12/16 faders per bank depending on screen width; page with
-  ◀ ▶, arrow keys, or jump to a channel number. Mouse wheel = fine adjust (Shift = ×10).
+  **Flash** (momentary full) and **0**. As many faders per bank as fit the screen (4–5 on a phone
+  in portrait, up to 16); page with ◀ ▶ or the arrow keys. Mouse wheel = fine adjust (Shift = ×10).
 * **Master** fader scales all console faders. **DBO** is a momentary dead blackout of the console
   layer, and **Full** sets the master back to 100%. **Clear** (tap twice) zeroes all console faders.
 * Console faders are merged **HTP** (highest takes precedence) with the Art-Net/sACN input, like a
@@ -161,7 +161,7 @@ A lighting-desk style page at `http://dmx-bridge-XXXX.local/console` (button on 
   fixtures' channels; naming a channel shows it. Named channels can be hidden from the menu too.
   Hidden channels are skipped when paging through banks; their DMX values are unchanged. A
   **Hidden n** button in the top bar shows them (dimmed) so you can name or **Show channel
-  again**; jumping to a hidden channel number turns it on as well.
+  again**.
   Names and hidden flags are stored on the bridge, in the `storage` partition as two alternating
   copies so a power cut can't corrupt them. They're shared by every device and update live on all
   open consoles. API: `GET /api/names` (`{"names":{...},"hidden":[5,6]}`), `POST /api/names`

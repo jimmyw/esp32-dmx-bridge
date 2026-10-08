@@ -70,12 +70,6 @@ export function App() {
     const maxPage = Math.floor((chans.length - 1) / bankSize) * bankSize;
     setBankCh(chans[Math.max(0, Math.min(maxPage, page + delta * bankSize))]);
   };
-  const jump = e => {
-    const c = Math.max(1, Math.min(N, +e.currentTarget.value || 1)) - 1;
-    if (isHidden(c)) setShowHidden(true);   // jumping to a hidden channel shows hidden ones
-    setBankCh(c);
-    e.currentTarget.value = '';
-  };
 
   useEvent(window, 'keydown', e => {
     if (e.target.tagName === 'INPUT') return;
@@ -126,8 +120,6 @@ export function App() {
         <button aria-label="previous bank" onClick={() => go(-1)}>◀</button>
         <span id="bank">{chans.length ? `Ch ${chans[page] + 1}–${chans[last] + 1}` : 'All hidden'}</span>
         <button aria-label="next bank" onClick={() => go(1)}>▶</button>
-        <input id="jump" type="number" min="1" max="512" placeholder="Ch #" aria-label="jump to channel"
-               onChange={jump} />
         <span class="sp" />
         {hiddenCount > 0 && (
           <button id="hidBtn" class={showHidden ? 'on' : ''} onClick={() => setShowHidden(!showHidden)}
@@ -137,7 +129,8 @@ export function App() {
         )}
         <button id="scnBtn" class={showScenes ? 'on' : ''} onClick={() => setShowScenes(!showScenes)}
                 title={showScenes ? 'hide the scenes toolbar' : 'show the scenes toolbar'}>Scenes</button>
-        <button title="toggle value display" onClick={() => setPct(!pct)}>{pct ? '%' : 'DMX'}</button>
+        <button id="pctBtn" class={pct ? 'on' : ''} onClick={() => setPct(!pct)}
+                title={pct ? 'showing values in percent – tap for DMX 0-255' : 'show values in percent'}>%</button>
         <button title="set all console faders to 0" onClick={clear}>{clearArmed ? 'Sure?' : 'Clear'}</button>
         <FullscreenButton />
         <a class="btn" href="/">Settings</a>

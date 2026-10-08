@@ -39,7 +39,6 @@ button:disabled{opacity:.5;cursor:default}
 .btns{display:flex;flex-direction:column;gap:4px;width:100%;margin-top:6px}
 .btns button{padding:6px 0;font-size:12px;width:100%}
 .btns button.fl:active,.btns button.fl.down{background:var(--acc);color:#000}
-#jump{width:70px;background:var(--strip);color:var(--fg);border:1px solid var(--line);border-radius:6px;padding:6px;font:inherit}
 #scenebar{display:flex;align-items:center;gap:6px;padding:6px 12px;background:var(--panel);border-bottom:1px solid var(--line)}
 #scenebar .lbl{color:var(--mut);font-size:12px;text-transform:uppercase;letter-spacing:.05em}
 #scenes{display:flex;gap:6px;overflow-x:auto;flex:1;scrollbar-width:thin;padding:2px 0}
@@ -61,7 +60,7 @@ button:disabled{opacity:.5;cursor:default}
 .strip.blank{visibility:hidden}
 .strip.hid{opacity:.45}
 .strip.hid .nm{border-style:dashed}
-#scnBtn.on{background:var(--acc);color:#000}
+#scnBtn.on,#pctBtn.on{background:var(--acc);color:#000}
 #hidBtn.on{background:var(--acc);color:#000}
 #chback{position:fixed;inset:0;z-index:9}
 #chmenu{position:fixed;z-index:10;width:230px;background:var(--panel);border:1px solid var(--acc);border-radius:8px;
