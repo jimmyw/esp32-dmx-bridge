@@ -262,3 +262,7 @@ tools/send_test.py sacn --universe 1             # multicast
 
 250 kbit/s 8N2; break 176 µs, mark-after-break 12 µs, start code 0 + 512 slots, sent
 continuously by a task pinned to core 1. Wi-Fi power save is disabled to keep latency low.
+
+## License
+
+MIT — see [LICENSE](LICENSE).
