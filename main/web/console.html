@@ -62,6 +62,7 @@ button:active{background:var(--line)}
 #editor{display:flex;gap:6px;align-items:center;flex-wrap:wrap;padding:6px 12px;background:#1a1610;border-bottom:1px solid #4a3a20}
 #editor input{flex:1;min-width:140px;background:var(--bg);color:var(--fg);border:1px solid var(--line);border-radius:6px;padding:7px;font:inherit}
 #editor .t{color:var(--acc);font-size:13px}
+#scenebar button.danger{border-color:var(--bad);color:var(--bad)}
 #editor button.danger{border-color:var(--bad);color:var(--bad)}
 #msg{color:var(--mut);font-size:12px}
 @media (max-width:560px){header h1{display:none}.strip.master{flex-basis:60px}}
@@ -85,6 +86,8 @@ button:active{background:var(--line)}
   <div id="scenes"></div>
   <label class="lbl" for="fade">Fade s</label>
   <input id="fade" type="number" min="0" max="60" step="0.1" value="0" title="fade time for recall (seconds)">
+  <button id="updBtn" hidden title="overwrite the active scene with the current faders">Update</button>
+  <button id="delBtn" class="danger" hidden title="delete the active scene">Delete</button>
   <button id="editBtn" title="save, rename or delete scenes">Edit</button>
 </div>
 <div id="editor" hidden>
@@ -312,6 +315,7 @@ function editName(s) {
 
 // ---- scenes (stored on the bridge) ----
 let scenes = [], sceneCount = 64, activeScene = 0, fading = false, editMode = false, editId = 0, delArmed = false;
+let barDelArmed = 0, barTimer = 0;
 const $ = id => document.getElementById(id);
 try { $('fade').value = localStorage.getItem('fade') || '0'; } catch (e) {}
 $('fade').addEventListener('change', () => { try { localStorage.setItem('fade', $('fade').value); } catch (e) {} });
@@ -324,7 +328,23 @@ async function fetchScenes() {
   } catch (e) {}
 }
 
+function renderSceneActions() {
+  const sc = !editMode && scenes.find(x => x.id === activeScene);
+  $('updBtn').hidden = $('delBtn').hidden = !sc;
+  if (!sc) { barDelArmed = 0; return; }
+  if (barDelArmed !== sc.id) barDelArmed = 0;
+  $('updBtn').title = `overwrite "${sc.name}" with the current faders`;
+  $('delBtn').title = `delete "${sc.name}"`;
+  $('delBtn').textContent = barDelArmed ? 'Tap again to delete' : 'Delete';
+}
+function flashBtn(b, text) {
+  const old = b.dataset.label || (b.dataset.label = b.textContent);
+  b.textContent = text; clearTimeout(barTimer);
+  barTimer = setTimeout(() => { b.textContent = old; }, 1500);
+}
+
 function renderScenes() {
+  renderSceneActions();
   const box = $('scenes');
   box.innerHTML = '';
   const add = (label, cls, fn, title) => {
@@ -342,7 +362,11 @@ function renderScenes() {
   }
   scenes.forEach((sc, i) => {
     const cls = (sc.id === activeScene ? 'active' : '') + (sc.id === activeScene && fading ? ' fading' : '');
-    add(sc.name, cls, () => recall(sc.id), `Scene ${sc.id}` + (i < 9 ? ` (key ${i + 1})` : ''));
+    const b = add(sc.name, cls, () => recall(sc.id),
+                  `Scene ${sc.id}` + (i < 9 ? ` (key ${i + 1})` : '') + ' – right-click / long-press to edit');
+    b.oncontextmenu = e => {                      // right-click or long-press: edit this scene
+      e.preventDefault(); editMode = true; $('editBtn').classList.add('on'); openEditor(sc.id);
+    };
   });
   add('+ Save', 'new', () => {
     const used = new Set(scenes.map(sc => sc.id));
@@ -398,6 +422,18 @@ $('edDelete').onclick = async () => {
   if (await sceneApi({action: 'delete', id: editId})) closeEditor();
 };
 $('edCancel').onclick = closeEditor;
+$('updBtn').onclick = async () => {
+  const id = activeScene;
+  if (await sceneApi({action: 'save', id, name: ''})) flashBtn($('updBtn'), 'Saved ✓');
+  else flashBtn($('updBtn'), $('msg').textContent || 'failed');
+};
+$('delBtn').onclick = async () => {
+  const id = activeScene;
+  if (barDelArmed !== id) { barDelArmed = id; renderSceneActions(); return; }
+  barDelArmed = 0;
+  if (await sceneApi({action: 'delete', id})) { activeScene = 0; fetchScenes(); }
+  else { renderSceneActions(); flashBtn($('delBtn'), $('msg').textContent || 'failed'); }
+};
 $('edName').addEventListener('keydown', e => {
   if (e.key === 'Enter') $('edSave').click();
   if (e.key === 'Escape') closeEditor();
