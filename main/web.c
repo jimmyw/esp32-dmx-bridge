@@ -14,7 +14,6 @@
 #include "esp_timer.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
-#include "mdns_svc.h"
 #include "wifi_mgr.h"
 
 static const char *TAG = "web";
@@ -165,41 +164,6 @@ static esp_err_t config_get(httpd_req_t *req)
     return send_json(req, r);
 }
 
-static bool get_int(cJSON *root, const char *key, int *out)
-{
-    cJSON *it = cJSON_GetObjectItemCaseSensitive(root, key);
-    if (cJSON_IsNumber(it)) {
-        *out = it->valueint;
-        return true;
-    }
-    if (cJSON_IsString(it) && it->valuestring[0]) {
-        *out = atoi(it->valuestring);
-        return true;
-    }
-    return false;
-}
-
-static const char *get_str(cJSON *root, const char *key)
-{
-    cJSON *it = cJSON_GetObjectItemCaseSensitive(root, key);
-    return cJSON_IsString(it) ? it->valuestring : NULL;
-}
-
-static bool valid_hostname(const char *h)
-{
-    size_t n = strlen(h);
-    if (n < 1 || n > 31 || h[0] == '-' || h[n - 1] == '-') {
-        return false;
-    }
-    for (size_t i = 0; i < n; i++) {
-        char c = h[i];
-        if (!((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') || c == '-')) {
-            return false;
-        }
-    }
-    return true;
-}
-
 static esp_err_t config_post(httpd_req_t *req)
 {
     if (req->content_len <= 0 || req->content_len > 2048) {
@@ -221,107 +185,57 @@ static esp_err_t config_post(httpd_req_t *req)
     body[got] = '\0';
     cJSON *root = cJSON_Parse(body);
     free(body);
-    if (!root) {
+    if (!cJSON_IsObject(root)) {
+        cJSON_Delete(root);
         return send_error(req, "invalid JSON");
     }
 
     bridge_config_t c = g_config;
     const char *err = NULL;
-    const char *s;
-    int v;
-
-    if ((s = get_str(root, "wifi_ssid"))) {
-        if (strlen(s) >= sizeof(c.wifi_ssid)) {
-            err = "SSID too long";
-        } else if (strcmp(s, c.wifi_ssid) != 0) {
-            strlcpy(c.wifi_ssid, s, sizeof(c.wifi_ssid));
-            c.wifi_pass[0] = '\0';   // new network: password must be given again
-        }
+    // SSID first: changing it clears the stored password.
+    cJSON *ssid = cJSON_GetObjectItemCaseSensitive(root, "wifi_ssid");
+    if (cJSON_IsString(ssid)) {
+        err = config_set_field(&c, "wifi_ssid", ssid->valuestring);
     }
-    if ((s = get_str(root, "wifi_pass")) && s[0]) {
-        size_t n = strlen(s);
-        if (n < 8 || n >= sizeof(c.wifi_pass)) {
-            err = "Wi-Fi password must be 8-63 characters";
+    cJSON *it;
+    cJSON_ArrayForEach(it, root) {
+        if (err) {
+            break;
+        }
+        if (strcmp(it->string, "wifi_ssid") == 0) {
+            continue;
+        }
+        char num[16];
+        const char *val;
+        if (cJSON_IsString(it)) {
+            val = it->valuestring;
+        } else if (cJSON_IsNumber(it)) {
+            snprintf(num, sizeof(num), "%d", it->valueint);
+            val = num;
+        } else if (cJSON_IsBool(it)) {
+            val = cJSON_IsTrue(it) ? "1" : "0";
         } else {
-            strlcpy(c.wifi_pass, s, sizeof(c.wifi_pass));
+            continue;
         }
-    }
-    if ((s = get_str(root, "hostname"))) {
-        if (!valid_hostname(s)) {
-            err = "hostname: 1-31 chars, letters, digits and '-'";
-        } else {
-            strlcpy(c.hostname, s, sizeof(c.hostname));
+        if (strcmp(it->string, "wifi_pass") == 0 && val[0] == '\0') {
+            continue;   // empty = keep the saved password
         }
-    }
-    if ((s = get_str(root, "name")) && s[0]) {
-        strlcpy(c.name, s, sizeof(c.name));
-    }
-    if (get_int(root, "protocol", &v)) {
-        if (v < PROTO_ARTNET || v > PROTO_BOTH) err = "invalid protocol";
-        else c.protocol = v;
-    }
-    if (get_int(root, "artnet_universe", &v)) {
-        if (v < 0 || v > 32767) err = "Art-Net universe must be 0-32767";
-        else c.artnet_port_addr = v;
-    }
-    if (get_int(root, "sacn_universe", &v)) {
-        if (v < 1 || v > 63999) err = "sACN universe must be 1-63999";
-        else c.sacn_universe = v;
-    }
-    if (get_int(root, "tx_pin", &v)) {
-        if (!config_pin_valid(v, false)) err = "invalid TX pin";
-        else c.tx_pin = v;
-    }
-    if (get_int(root, "de_pin", &v)) {
-        if (!config_pin_valid(v, true)) err = "invalid DE pin";
-        else c.de_pin = v;
-    }
-    if (get_int(root, "led_pin", &v)) {
-        if (!config_pin_valid(v, true)) err = "invalid LED pin";
-        else c.led_pin = v;
-    }
-    if (get_int(root, "uart", &v)) {
-        if (v < 1 || v > 2) err = "UART must be 1 or 2";
-        else c.uart_num = v;
-    }
-    if (get_int(root, "refresh_hz", &v)) {
-        if (v < 1 || v > 44) err = "refresh must be 1-44 Hz";
-        else c.refresh_hz = v;
-    }
-    if (get_int(root, "on_loss", &v)) {
-        c.on_loss = v ? LOSS_BLACKOUT : LOSS_HOLD;
-    }
-    if (get_int(root, "loss_timeout_ms", &v)) {
-        if (v < 500 || v > 60000) err = "loss timeout must be 500-60000 ms";
-        else c.loss_timeout_ms = v;
+        err = config_set_field(&c, it->string, val);
+        if (err && strcmp(err, "unknown setting") == 0) {
+            static char msg[64];
+            snprintf(msg, sizeof(msg), "unknown setting \"%.40s\"", it->string);
+            err = msg;
+        }
     }
     cJSON_Delete(root);
 
-    if (!err && (c.tx_pin == c.de_pin || (c.led_pin >= 0 && (c.led_pin == c.tx_pin || c.led_pin == c.de_pin)))) {
-        err = "pins must be different";
+    bool reboot = false;
+    if (!err) {
+        err = config_commit(&c, &reboot);
     }
     if (err) {
         return send_error(req, err);
     }
-
-    bool reboot = strcmp(c.wifi_ssid, g_config.wifi_ssid) != 0 ||
-                  strcmp(c.wifi_pass, g_config.wifi_pass) != 0 ||
-                  strcmp(c.hostname, g_config.hostname) != 0 ||
-                  c.tx_pin != g_config.tx_pin || c.de_pin != g_config.de_pin ||
-                  c.led_pin != g_config.led_pin || c.uart_num != g_config.uart_num;
-    bool universe_changed = c.artnet_port_addr != g_config.artnet_port_addr ||
-                            c.sacn_universe != g_config.sacn_universe ||
-                            c.protocol != g_config.protocol;
-
-    g_config = c;
-    esp_err_t serr = config_save();
-    if (serr != ESP_OK) {
-        return send_error(req, "failed to save to flash");
-    }
-    if (universe_changed) {
-        dmx_buffer_reset_sources();   // sACN task re-joins multicast on its own
-    }
-    mdns_svc_update();
 
     cJSON *r = cJSON_CreateObject();
     cJSON_AddBoolToObject(r, "ok", true);

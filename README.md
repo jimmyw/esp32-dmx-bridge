@@ -49,6 +49,10 @@ If the Wi-Fi is unreachable for 20 s the AP comes back, so you can always reconf
 retrying your network in the background and closes the AP once it is connected and nobody is on
 the AP.
 
+**Over USB instead:** connect a serial terminal (`idf.py -p <port> monitor`, or
+`picocom /dev/ttyACM*`) and type `wifi "My Network" mypassword`. The bridge saves it and
+restarts. See [Serial console](#serial-console).
+
 **Factory reset:** hold BOOT (GPIO0) for 5 s, or use the button in the web UI.
 
 ## Discovery
@@ -92,6 +96,26 @@ JSON API: `GET /api/status`, `GET/POST /api/config`, `GET /api/scan`, `POST /api
 `POST /api/factory_reset`,
 `POST /api/ota` (raw `.bin` as the body, e.g.
 `curl --data-binary @build/dmx_bridge.bin http://dmx-bridge-XXXX.local/api/ota`).
+
+## Serial console
+
+The USB-Serial/JTAG port carries the log and a command line (`dmx>` prompt):
+
+| Command | |
+|---|---|
+| `help` | list commands |
+| `status` | Wi-Fi state, IP, active DMX source, packet counters |
+| `wifi <ssid> [password]` | save Wi-Fi credentials and restart (quote SSIDs with spaces) |
+| `wifi --forget` | erase credentials, restart into setup-AP mode |
+| `scan` | list nearby Wi-Fi networks |
+| `config` | show all settings |
+| `set <key> <value>` | change a setting, e.g. `set sacn_universe 2`, `set protocol artnet`, `set on_loss blackout` |
+| `dmx [n]` | show the first n output channels (default 32) |
+| `log <level> [tag]` | change log verbosity, e.g. `log warn` to quiet the console |
+| `reboot` / `factory_reset yes` | restart / erase all settings |
+
+`set` accepts the same keys and rules as the web UI. Pin, UART and hostname changes take effect
+after `reboot`.
 
 ## Testing without QLC+
 

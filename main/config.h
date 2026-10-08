@@ -40,3 +40,15 @@ esp_err_t config_save(void);           // persist g_config
 esp_err_t config_factory_reset(void);  // erase NVS namespace
 bool      config_pin_valid(int pin, bool allow_none);
 const char *config_mac_suffix(void);   // "A1B2" (last 2 MAC bytes)
+
+// Set one field of `c` from its text form (shared by the web API and the serial CLI).
+// Keys: wifi_ssid wifi_pass hostname name protocol artnet_universe sacn_universe tx_pin
+// de_pin led_pin uart refresh_hz on_loss loss_timeout_ms. Returns NULL or an error message.
+// Changing wifi_ssid clears wifi_pass, so set the SSID first.
+const char *config_set_field(bridge_config_t *c, const char *key, const char *value);
+
+// Validate `c`, make it the live config, persist it and apply what can change at runtime.
+// *reboot is set when Wi-Fi, hostname or hardware settings changed. Returns NULL or an error.
+const char *config_commit(const bridge_config_t *c, bool *reboot);
+
+extern const char *const CONFIG_KEYS[];

@@ -1,4 +1,5 @@
 #include "artnet.h"
+#include "cli.h"
 #include "config.h"
 #include "dmx_buffer.h"
 #include "dmx_out.h"
@@ -95,6 +96,7 @@ void app_main(void)
     ESP_ERROR_CHECK(sacn_start());
     ESP_ERROR_CHECK(web_start());
     xTaskCreate(ui_task, "ui", 3072, NULL, 3, NULL);
+    ESP_ERROR_CHECK(cli_start());
 
     // Everything came up: confirm a freshly uploaded firmware so the bootloader keeps it.
     // If it crashes before reaching this point, the next reset rolls back to the old one.
