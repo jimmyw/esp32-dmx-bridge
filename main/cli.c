@@ -275,14 +275,40 @@ static int cmd_names(int argc, char **argv)
 {
     int n = 0;
     for (int i = 0; i < DMX_SLOTS; i++) {
-        if (names_get(i)[0]) {
-            printf("%4d  %s\n", i + 1, names_get(i));
+        if (names_get(i)[0] || names_hidden(i)) {
+            printf("%4d  %s%s\n", i + 1, names_get(i), names_hidden(i) ? "  (hidden)" : "");
             n++;
         }
     }
     if (!n) {
         printf("No channel names set. Use: name <channel> <text>\n");
     }
+    return 0;
+}
+
+/* ---- hide <ch> / unhide <ch|all> ---- */
+
+static int cmd_hide(int argc, char **argv)
+{
+    bool hide = strcmp(argv[0], "hide") == 0;
+    if (argc != 2) {
+        printf("Usage: %s\n", hide ? "hide <channel 1-512>" : "unhide <channel 1-512|all>");
+        return 1;
+    }
+    if (!hide && strcmp(argv[1], "all") == 0) {
+        names_show_all();
+    } else {
+        char *end;
+        long ch = strtol(argv[1], &end, 10);
+        if (*end || ch < 1 || ch > DMX_SLOTS) {
+            printf("Error: channel must be 1-512\n");
+            return 1;
+        }
+        names_set_hidden(ch - 1, hide);
+    }
+    names_save_soon();
+    console_names_changed();
+    printf("OK\n");
     return 0;
 }
 
@@ -413,7 +439,9 @@ esp_err_t cli_start(void)
         { .command = "scan", .help = "Scan for Wi-Fi networks", .func = cmd_scan },
         { .command = "dmx", .help = "Show current DMX output values", .func = cmd_dmx, .argtable = &dmx_args },
         { .command = "name", .help = "Name a channel: name <1-512> [text] (no text = remove)", .func = cmd_name },
-        { .command = "names", .help = "List channel names", .func = cmd_names },
+        { .command = "names", .help = "List channel names and hidden channels", .func = cmd_names },
+        { .command = "hide", .help = "Hide a channel on the web console: hide <1-512>", .func = cmd_hide },
+        { .command = "unhide", .help = "Show a hidden channel again: unhide <1-512|all>", .func = cmd_hide },
         { .command = "scene", .help = "Console scenes: scene list|save|recall|rename|delete", .func = cmd_scene },
         { .command = "log", .help = "Set log level: log <none|error|warn|info|debug> [tag]", .func = cmd_log },
         { .command = "reboot", .help = "Restart the bridge", .func = cmd_reboot },

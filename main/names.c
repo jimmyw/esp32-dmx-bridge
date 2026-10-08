@@ -27,35 +27,44 @@ typedef struct {
     uint32_t crc;
 } slot_header_t;
 
-static char s_names[DMX_SLOTS][NAME_MAX_LEN + 1];
+// Stored table. Older firmware wrote only `names`; such slots load with nothing hidden.
+typedef struct {
+    char    names[DMX_SLOTS][NAME_MAX_LEN + 1];
+    uint8_t hidden[DMX_SLOTS / 8];   // bit set = channel hidden on the console
+} table_t;
+
+static table_t s_tab;
+#define s_names s_tab.names
 static SemaphoreHandle_t s_lock;
 static const esp_partition_t *s_part;
 static uint32_t s_seq;
 static int s_slot;           // slot written most recently
 static TaskHandle_t s_task;
 
-_Static_assert(sizeof(slot_header_t) + sizeof(s_names) <= SLOT_SIZE, "names table too big for slot");
+_Static_assert(sizeof(slot_header_t) + sizeof(table_t) <= SLOT_SIZE, "names table too big for slot");
 
 static bool read_slot(int slot, slot_header_t *hdr)
 {
     if (esp_partition_read(s_part, slot * SLOT_SIZE, hdr, sizeof(*hdr)) != ESP_OK ||
-        hdr->magic != NAMES_MAGIC || hdr->len != sizeof(s_names)) {
+        hdr->magic != NAMES_MAGIC ||
+        (hdr->len != sizeof(table_t) && hdr->len != sizeof(s_tab.names))) {
         return false;
     }
-    static char tmp[DMX_SLOTS][NAME_MAX_LEN + 1];
-    if (esp_partition_read(s_part, slot * SLOT_SIZE + sizeof(*hdr), tmp, sizeof(tmp)) != ESP_OK ||
-        esp_crc32_le(0, (const uint8_t *)tmp, sizeof(tmp)) != hdr->crc) {
+    static table_t tmp;
+    memset(&tmp, 0, sizeof(tmp));
+    if (esp_partition_read(s_part, slot * SLOT_SIZE + sizeof(*hdr), &tmp, hdr->len) != ESP_OK ||
+        esp_crc32_le(0, (const uint8_t *)&tmp, hdr->len) != hdr->crc) {
         return false;
     }
-    memcpy(s_names, tmp, sizeof(s_names));
+    memcpy(&s_tab, &tmp, sizeof(s_tab));
     return true;
 }
 
 static void save_now(void)
 {
-    static char snap[DMX_SLOTS][NAME_MAX_LEN + 1];
+    static table_t snap;
     xSemaphoreTake(s_lock, portMAX_DELAY);
-    memcpy(snap, s_names, sizeof(snap));
+    memcpy(&snap, &s_tab, sizeof(snap));
     xSemaphoreGive(s_lock);
 
     int slot = s_slot ^ 1;
@@ -63,11 +72,11 @@ static void save_now(void)
         .magic = NAMES_MAGIC,
         .seq = s_seq + 1,
         .len = sizeof(snap),
-        .crc = esp_crc32_le(0, (const uint8_t *)snap, sizeof(snap)),
+        .crc = esp_crc32_le(0, (const uint8_t *)&snap, sizeof(snap)),
     };
     esp_err_t err = esp_partition_erase_range(s_part, slot * SLOT_SIZE, SLOT_SIZE);
     if (err == ESP_OK) {
-        err = esp_partition_write(s_part, slot * SLOT_SIZE + sizeof(hdr), snap, sizeof(snap));
+        err = esp_partition_write(s_part, slot * SLOT_SIZE + sizeof(hdr), &snap, sizeof(snap));
     }
     if (err == ESP_OK) {
         // Header last: the slot only becomes valid once everything else is on flash.
@@ -96,7 +105,7 @@ static void names_task(void *arg)
 esp_err_t names_init(void)
 {
     s_lock = xSemaphoreCreateMutex();
-    memset(s_names, 0, sizeof(s_names));
+    memset(&s_tab, 0, sizeof(s_tab));
     s_part = esp_partition_find_first(ESP_PARTITION_TYPE_DATA, ESP_PARTITION_SUBTYPE_ANY, "storage");
     if (!s_part || s_part->size < 2 * SLOT_SIZE) {
         ESP_LOGW(TAG, "no 'storage' partition: channel names will not be saved");
@@ -115,14 +124,15 @@ esp_err_t names_init(void)
         s_slot = v1 ? 1 : 0;
         s_seq = v1 ? h1.seq : h0.seq;
     } else {
-        memset(s_names, 0, sizeof(s_names));
+        memset(&s_tab, 0, sizeof(s_tab));
         s_slot = 1;   // first save goes to slot 0
     }
-    int named = 0;
+    int named = 0, hidden = 0;
     for (int i = 0; i < DMX_SLOTS; i++) {
         named += s_names[i][0] != '\0';
+        hidden += names_hidden(i);
     }
-    ESP_LOGI(TAG, "%d named channels", named);
+    ESP_LOGI(TAG, "%d named channels, %d hidden", named, hidden);
     xTaskCreate(names_task, "names", 3072, NULL, 2, &s_task);
     return ESP_OK;
 }
@@ -166,6 +176,33 @@ bool names_set(int ch, const char *name)
     names_sanitize(s_names[ch], name);
     xSemaphoreGive(s_lock);
     return true;
+}
+
+bool names_hidden(int ch)
+{
+    return ch >= 0 && ch < DMX_SLOTS && (s_tab.hidden[ch >> 3] & (1u << (ch & 7)));
+}
+
+bool names_set_hidden(int ch, bool hidden)
+{
+    if (ch < 0 || ch >= DMX_SLOTS) {
+        return false;
+    }
+    xSemaphoreTake(s_lock, portMAX_DELAY);
+    if (hidden) {
+        s_tab.hidden[ch >> 3] |= 1u << (ch & 7);
+    } else {
+        s_tab.hidden[ch >> 3] &= ~(1u << (ch & 7));
+    }
+    xSemaphoreGive(s_lock);
+    return true;
+}
+
+void names_show_all(void)
+{
+    xSemaphoreTake(s_lock, portMAX_DELAY);
+    memset(s_tab.hidden, 0, sizeof(s_tab.hidden));
+    xSemaphoreGive(s_lock);
 }
 
 void names_clear_all(void)

@@ -224,7 +224,7 @@ static esp_err_t json_result(httpd_req_t *req, const char *err)
     return send_json(req, r);
 }
 
-// GET /api/names -> {"max_len":24,"names":{"1":"Front wash",...}}  (1-based channel numbers)
+// GET /api/names -> {"max_len":24,"names":{"1":"Front wash",...},"hidden":[5,6]}  (1-based channels)
 static esp_err_t names_get_handler(httpd_req_t *req)
 {
     cJSON *r = cJSON_CreateObject();
@@ -238,10 +238,17 @@ static esp_err_t names_get_handler(httpd_req_t *req)
             cJSON_AddStringToObject(n, key, nm);
         }
     }
+    cJSON *h = cJSON_AddArrayToObject(r, "hidden");
+    for (int i = 0; i < DMX_SLOTS; i++) {
+        if (names_hidden(i)) {
+            cJSON_AddItemToArray(h, cJSON_CreateNumber(i + 1));
+        }
+    }
     return send_json(req, r);
 }
 
-// POST /api/names {"1":"Front wash","2":""}  ("" removes a name), or {"clear":true}
+// POST /api/names {"1":"Front wash","2":""}  ("" removes a name), {"clear":true} (all names),
+//                 {"hidden":{"5":true,"6":false}}, {"show_all":true} (unhide every channel)
 static esp_err_t names_post_handler(httpd_req_t *req)
 {
     cJSON *root = read_json_body(req, 24 * 1024);
@@ -253,7 +260,22 @@ static esp_err_t names_post_handler(httpd_req_t *req)
         names_clear_all();
         changed++;
     }
+    if (cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(root, "show_all"))) {
+        names_show_all();
+        changed++;
+    }
+    cJSON *hid = cJSON_GetObjectItemCaseSensitive(root, "hidden");
     cJSON *it;
+    if (cJSON_IsObject(hid)) {
+        cJSON_ArrayForEach(it, hid) {
+            char *end;
+            long ch = strtol(it->string, &end, 10);
+            if (*end == '\0' && ch >= 1 && ch <= DMX_SLOTS && cJSON_IsBool(it)) {
+                names_set_hidden(ch - 1, cJSON_IsTrue(it));
+                changed++;
+            }
+        }
+    }
     cJSON_ArrayForEach(it, root) {
         char *end;
         long ch = strtol(it->string, &end, 10);

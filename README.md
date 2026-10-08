@@ -146,12 +146,17 @@ A lighting-desk style page at `http://dmx-bridge-XXXX.local/console` (button on 
   down, even when QLC+ stops.
 * Several phones/tablets can be open at once. A WebSocket (`/ws`) keeps them in sync, at about
   15 updates/s.
-* **Channel names:** tap the label at the top of a strip to name it (up to 24 bytes, UTF-8).
-  Enter saves, Esc cancels, Tab moves to the next strip. Names are stored on the bridge, in
-  the `storage` partition as two alternating copies so a power cut can't corrupt them. They're
-  shared by every device and update live on all open consoles. API: `GET /api/names`,
-  `POST /api/names` with `{"1":"Front wash","2":""}` (empty = remove) or `{"clear":true}`.
-  Serial console: `name 1 Front wash`, `names`.
+* **Channel menu:** tap the name bar at the top of a strip to open its menu: set a name (up to
+  24 bytes, UTF-8) or **Hide channel**. Enter saves, Esc cancels, Tab moves to the next strip.
+  Hidden channels are skipped when paging through banks; their DMX values are unchanged. Once
+  any channel is hidden, a **Show hidden (n)** button appears in the top bar: turn it on to see
+  hidden channels (dimmed) and use their menu to **Show channel again**.
+  Names and hidden flags are stored on the bridge, in the `storage` partition as two alternating
+  copies so a power cut can't corrupt them. They're shared by every device and update live on all
+  open consoles. API: `GET /api/names` (`{"names":{...},"hidden":[5,6]}`), `POST /api/names`
+  with `{"1":"Front wash","2":""}` (empty = remove), `{"hidden":{"5":true,"6":false}}`,
+  `{"show_all":true}` or `{"clear":true}` (names only).
+  Serial console: `name 1 Front wash`, `names`, `hide 5`, `unhide 5` / `unhide all`.
 * **Scenes:** up to 64 snapshots of all console faders, stored on the bridge (one flash sector each,
   CRC-checked). Tap a scene in the scene bar to recall it, using the **Fade s** time (0–60 s; the
   fade runs on the bridge, so every open console sees it). Moving a fader during a fade takes
@@ -194,6 +199,7 @@ The USB-Serial/JTAG port carries the log and a command line (`dmx>` prompt):
 | `config` | show all settings |
 | `set <key> <value>` | change a setting, e.g. `set sacn_universe 2`, `set protocol artnet`, `set on_loss blackout` |
 | `name <ch> [text]` / `names` | set (no text = remove) / list channel names |
+| `hide <ch>` / `unhide <ch\|all>` | hide / show channels on the web console |
 | `scene list` / `save <n> [name]` / `recall <n> [fade s]` / `rename <n> <name>` / `delete <n>` | console scenes |
 | `dmx [n]` | show the first n output channels (default 32) |
 | `log <level> [tag]` | change log verbosity, e.g. `log warn` to quiet the console |

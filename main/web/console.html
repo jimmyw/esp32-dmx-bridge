@@ -37,12 +37,10 @@ button:active{background:var(--line)}
 .cap::after{content:"";position:absolute;left:4px;right:4px;top:9px;height:2px;background:#333}
 .master .cap{background:linear-gradient(#ffd38a,#d08a20)}
 .ch{font-size:12px;color:var(--mut);font-variant-numeric:tabular-nums}
-.nm{width:100%;height:30px;font-size:11px;line-height:13px;text-align:center;overflow:hidden;cursor:text;
+.nm{width:100%;height:30px;font-size:11px;line-height:13px;text-align:center;overflow:hidden;cursor:pointer;
   border-radius:4px;background:#0f0f12;border:1px solid var(--line);padding:1px 2px;margin-bottom:5px;
   display:flex;align-items:center;justify-content:center;word-break:break-word;color:var(--fg)}
 .nm.empty{color:#55555f}
-.nm input{width:100%;background:var(--bg);color:var(--fg);border:1px solid var(--acc);border-radius:3px;
-  font:inherit;font-size:12px;padding:2px;text-align:center}
 .master .nm{cursor:default;color:var(--acc);border-color:#4a3a20}
 .btns{display:flex;flex-direction:column;gap:4px;width:100%;margin-top:6px}
 .btns button{padding:6px 0;font-size:12px;width:100%}
@@ -66,6 +64,18 @@ button:active{background:var(--line)}
 #scenebar button.danger{border-color:var(--bad);color:var(--bad)}
 #editor button.danger{border-color:var(--bad);color:var(--bad)}
 #msg{color:var(--mut);font-size:12px}
+.strip.blank{visibility:hidden}
+.strip.hid{opacity:.45}
+.strip.hid .nm{border-style:dashed}
+#hidBtn.on{background:var(--acc);color:#000}
+#chback{position:fixed;inset:0;z-index:9}
+#chmenu{position:fixed;z-index:10;width:230px;background:var(--panel);border:1px solid var(--acc);border-radius:8px;
+  padding:10px;box-shadow:0 8px 24px #000a;display:flex;flex-direction:column;gap:8px}
+#chmenu .t{color:var(--acc);font-size:13px}
+#chmenu input{width:100%;background:var(--bg);color:var(--fg);border:1px solid var(--line);border-radius:6px;
+  padding:8px;font:inherit;user-select:text;-webkit-user-select:text}
+#chmenu .row{display:flex;gap:6px}
+#chmenu .row button{flex:1}
 [hidden]{display:none!important}
 @media (max-width:560px){header h1{display:none}.strip.master{flex-basis:60px}}
 </style>
@@ -79,6 +89,7 @@ button:active{background:var(--line)}
   <button id="next" aria-label="next bank">▶</button>
   <input id="jump" type="number" min="1" max="512" placeholder="Ch #" aria-label="jump to channel">
   <span class="sp"></span>
+  <button id="hidBtn" hidden title="show hidden channels so you can unhide them"></button>
   <button id="units" title="toggle value display">DMX</button>
   <button id="clear" title="set all console faders to 0">Clear</button>
   <button id="fsBtn" hidden title="fullscreen (F)" aria-label="toggle fullscreen">⛶ Full</button>
@@ -102,6 +113,13 @@ button:active{background:var(--line)}
   <button id="edCancel">Cancel</button>
   <span id="msg"></span>
 </div>
+<div id="chback" hidden></div>
+<div id="chmenu" hidden role="dialog" aria-label="channel settings">
+  <span class="t" id="cmTitle"></span>
+  <input id="cmName" maxlength="24" placeholder="Name">
+  <button id="cmHide"></button>
+  <div class="row"><button id="cmSave">Save</button><button id="cmCancel">Cancel</button></div>
+</div>
 <div id="desk">
   <div id="strips"></div>
   <div class="strip master" id="masterStrip"></div>
@@ -110,13 +128,20 @@ button:active{background:var(--line)}
 <script>
 const N = 512;
 const manual = new Uint8Array(N), output = new Uint8Array(N);
-let master = 255, bankSize = 16, bankStart = 0, ws = null, pct = false;
+let master = 255, bankSize = 16, bankCh = 0, ws = null, pct = false;
+const hidden = new Set();           // 0-based channels hidden on the console
+let showHidden = false;
+let chans = [];                     // channels that get a strip, in order
+let page = 0;                       // index into chans of the first strip
 const touched = new Map();          // ch -> timestamp of last local change (ignore echoes briefly)
 const pending = new Map();          // ch -> value to send
 const MASTER = 0xFFFF;
 const strips = [];                  // visible strip objects
 
-try { pct = localStorage.getItem('pct') === '1'; bankStart = +localStorage.getItem('bank') || 0; } catch (e) {}
+try {
+  pct = localStorage.getItem('pct') === '1'; bankCh = +localStorage.getItem('bank') || 0;
+  showHidden = localStorage.getItem('showHidden') === '1';
+} catch (e) {}
 
 const fmt = v => pct ? Math.round(v / 2.55) + '%' : String(v);
 
@@ -137,7 +162,7 @@ function makeStrip(parent, isMaster) {
     nm: root.querySelector('.nm'),
   };
   bindFader(s);
-  if (!isMaster) s.nm.addEventListener('click', () => editName(s));
+  if (!isMaster) s.nm.addEventListener('click', () => openChanMenu(s));
   return s;
 }
 
@@ -195,6 +220,7 @@ function bindFader(s) {
 const cur = s => s.isMaster ? master : manual[s.ch];
 
 function render(s) {
+  if (s.ch < 0) return;
   const v = cur(s);
   s.val.textContent = fmt(v);
   const g = s.track.clientHeight - 20;
@@ -218,21 +244,41 @@ function layout() {
     box.style.gridTemplateColumns = `repeat(${size}, minmax(0,1fr))`;
     for (let i = 0; i < size; i++) strips.push(makeStrip(box, false));
   }
-  bankStart = Math.min(Math.floor(bankStart / bankSize) * bankSize, N - bankSize);
-  strips.forEach((s, i) => { s.ch = bankStart + i; s.label.textContent = s.ch + 1; renderName(s); });
-  document.getElementById('bank').textContent = `Ch ${bankStart + 1}–${bankStart + bankSize}`;
-  try { localStorage.setItem('bank', bankStart); } catch (e) {}
+  chans = [];
+  for (let c = 0; c < N; c++) if (showHidden || !hidden.has(c)) chans.push(c);
+  // Keep the bank that holds bankCh (or the next visible channel after it).
+  let idx = chans.findIndex(c => c >= bankCh);
+  if (idx < 0) idx = chans.length - 1;
+  page = Math.max(0, Math.floor(idx / bankSize) * bankSize);
+  strips.forEach((s, i) => {
+    s.ch = page + i < chans.length ? chans[page + i] : -1;
+    s.root.classList.toggle('blank', s.ch < 0);
+    s.root.classList.toggle('hid', hidden.has(s.ch));
+    s.label.textContent = s.ch < 0 ? '' : s.ch + 1;
+    renderName(s);
+  });
+  const last = Math.min(chans.length, page + bankSize) - 1;
+  document.getElementById('bank').textContent =
+    chans.length ? `Ch ${chans[page] + 1}–${chans[last] + 1}` : 'All hidden';
+  if (chans.length) bankCh = chans[page];
+  try { localStorage.setItem('bank', bankCh); } catch (e) {}
+  renderHidBtn();
   renderAll();
 }
 
 function renderAll() { strips.forEach(render); render(masterStrip); }
 
-function go(delta) { bankStart = Math.max(0, Math.min(N - bankSize, bankStart + delta * bankSize)); layout(); }
+function go(delta) {
+  if (!chans.length) return;
+  const p = Math.max(0, Math.min(Math.floor((chans.length - 1) / bankSize) * bankSize, page + delta * bankSize));
+  bankCh = chans[p]; layout();
+}
 document.getElementById('prev').onclick = () => go(-1);
 document.getElementById('next').onclick = () => go(1);
 document.getElementById('jump').addEventListener('change', e => {
   const c = Math.max(1, Math.min(N, +e.target.value || 1)) - 1;
-  bankStart = Math.floor(c / bankSize) * bankSize; e.target.value = ''; layout();
+  if (hidden.has(c) && !showHidden) { showHidden = true; saveShowHidden(); }   // jumping to a hidden one
+  bankCh = c; e.target.value = ''; layout();
 });
 document.getElementById('units').onclick = e => {
   pct = !pct; e.target.textContent = pct ? '%' : 'DMX';
@@ -261,17 +307,27 @@ window.addEventListener('keydown', e => {
   if (e.key === 'ArrowRight' || e.key === 'PageDown') go(1);
 });
 
-// ---- channel names (stored on the bridge, shared by all clients) ----
+// ---- channel names / hidden channels (stored on the bridge, shared by all clients) ----
 const names = {};   // 0-based channel -> name
 let nameMax = 24;
 
 function renderName(s) {
-  if (s.editing) return;
+  if (s.ch < 0) { s.nm.textContent = ''; s.root.title = ''; return; }
   const n = names[s.ch] || '';
   s.nm.textContent = n || 'name';
   s.nm.classList.toggle('empty', !n);
-  s.root.title = n ? `Ch ${s.ch + 1}: ${n}` : `Ch ${s.ch + 1}`;
+  s.root.title = (n ? `Ch ${s.ch + 1}: ${n}` : `Ch ${s.ch + 1}`) + (hidden.has(s.ch) ? ' (hidden)' : '');
 }
+
+function saveShowHidden() { try { localStorage.setItem('showHidden', showHidden ? '1' : '0'); } catch (e) {} }
+
+function renderHidBtn() {
+  const b = document.getElementById('hidBtn');
+  b.hidden = hidden.size === 0;
+  b.textContent = `${showHidden ? 'Showing' : 'Show'} hidden (${hidden.size})`;
+  b.classList.toggle('on', showHidden);
+}
+document.getElementById('hidBtn').onclick = () => { showHidden = !showHidden; saveShowHidden(); layout(); };
 
 async function fetchNames() {
   try {
@@ -279,42 +335,67 @@ async function fetchNames() {
     nameMax = r.max_len || nameMax;
     for (const k in names) delete names[k];
     for (const [ch, n] of Object.entries(r.names)) names[+ch - 1] = n;
-    strips.forEach(renderName);
+    hidden.clear();
+    for (const ch of r.hidden || []) hidden.add(ch - 1);
+    if (!hidden.size) showHidden = false;
+    layout();
   } catch (e) {}
 }
 
-function editName(s) {
-  if (s.editing) return;
-  s.editing = true;
-  const ch = s.ch, inp = document.createElement('input');
-  inp.value = names[ch] || ''; inp.maxLength = nameMax; inp.placeholder = `Ch ${ch + 1}`;
-  inp.setAttribute('aria-label', `name for channel ${ch + 1}`);
-  s.nm.textContent = ''; s.nm.classList.remove('empty'); s.nm.appendChild(inp);
-  inp.focus(); inp.select();
-  let done = false;
-  const finish = async save => {
-    if (done) return; done = true; s.editing = false;
-    const v = inp.value.trim();
-    if (save && v !== (names[ch] || '')) {
-      if (v) names[ch] = v; else delete names[ch];
-      try {
-        await fetch('/api/names', {method: 'POST', headers: {'Content-Type': 'application/json'},
-                                   body: JSON.stringify({[ch + 1]: v})});
-      } catch (e) {}
-    }
-    if (s.ch === ch) renderName(s);
-  };
-  inp.addEventListener('keydown', e => {
-    if (e.key === 'Enter') { e.preventDefault(); finish(true); }
-    else if (e.key === 'Escape') finish(false);
-    else if (e.key === 'Tab') {               // Tab = save and edit the next strip
-      e.preventDefault(); finish(true);
-      const i = strips.indexOf(s) + (e.shiftKey ? -1 : 1);
-      if (strips[i]) setTimeout(() => editName(strips[i]), 0);
-    }
-  });
-  inp.addEventListener('blur', () => finish(true));
+async function postNames(body) {
+  try {
+    await fetch('/api/names', {method: 'POST', headers: {'Content-Type': 'application/json'},
+                               body: JSON.stringify(body)});
+  } catch (e) {}
 }
+
+// Channel menu: opened by tapping a strip's name bar.
+let menuCh = -1;
+function openChanMenu(s) {
+  if (s.ch < 0) return;
+  const ch = menuCh = s.ch;
+  const m = document.getElementById('chmenu'), inp = document.getElementById('cmName');
+  document.getElementById('cmTitle').textContent = `Channel ${ch + 1}`;
+  inp.value = names[ch] || ''; inp.maxLength = nameMax; inp.placeholder = `Name for ch ${ch + 1}`;
+  document.getElementById('cmHide').textContent = hidden.has(ch) ? 'Show channel again' : 'Hide channel';
+  m.hidden = false; document.getElementById('chback').hidden = false;
+  const r = s.nm.getBoundingClientRect(), w = m.offsetWidth, h = m.offsetHeight;
+  m.style.left = Math.max(8, Math.min(innerWidth - w - 8, r.left + r.width / 2 - w / 2)) + 'px';
+  m.style.top = Math.max(8, Math.min(innerHeight - h - 8, r.bottom + 6)) + 'px';
+  if (matchMedia('(pointer:fine)').matches) { inp.focus(); inp.select(); }   // no surprise keyboard on phones
+}
+function closeChanMenu() {
+  menuCh = -1;
+  document.getElementById('chmenu').hidden = true; document.getElementById('chback').hidden = true;
+}
+// Apply the menu; hide: true/false to change the hidden flag, undefined to leave it.
+function applyChanMenu(hide) {
+  const ch = menuCh;
+  if (ch < 0) return;
+  const v = document.getElementById('cmName').value.trim(), body = {};
+  if (v !== (names[ch] || '')) { body[ch + 1] = v; if (v) names[ch] = v; else delete names[ch]; }
+  if (hide !== undefined && hide !== hidden.has(ch)) {
+    body.hidden = {[ch + 1]: hide};
+    if (hide) hidden.add(ch); else hidden.delete(ch);
+    if (!hidden.size) showHidden = false;
+  }
+  closeChanMenu();
+  if (Object.keys(body).length) { postNames(body); layout(); }
+}
+document.getElementById('cmSave').onclick = () => applyChanMenu();
+document.getElementById('cmHide').onclick = () => applyChanMenu(!hidden.has(menuCh));
+document.getElementById('cmCancel').onclick = closeChanMenu;
+document.getElementById('chback').onclick = closeChanMenu;
+document.getElementById('cmName').addEventListener('keydown', e => {
+  if (e.key === 'Enter') { e.preventDefault(); applyChanMenu(); }
+  else if (e.key === 'Escape') closeChanMenu();
+  else if (e.key === 'Tab') {               // Tab = save and edit the next strip's name
+    e.preventDefault();
+    const i = strips.findIndex(x => x.ch === menuCh) + (e.shiftKey ? -1 : 1);
+    applyChanMenu();
+    if (strips[i] && strips[i].ch >= 0) setTimeout(() => openChanMenu(strips[i]), 0);
+  }
+});
 
 // ---- scenes (stored on the bridge) ----
 let scenes = [], sceneCount = 64, activeScene = 0, fading = false, editMode = false, editId = 0, delArmed = false;
