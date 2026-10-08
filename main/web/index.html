@@ -106,6 +106,21 @@ button.danger{background:var(--bad)}
   <div class="hint">Wi-Fi, hostname and pin changes restart the bridge.</div>
 </section>
 
+<section class="card">
+  <h2>Firmware</h2>
+  <div class="hint" id="fw_info" style="margin-bottom:8px"></div>
+  <div class="row" style="margin-bottom:6px">
+    <div><input id="fw_file" type="file" accept=".bin,application/octet-stream"></div>
+  </div>
+  <div class="actions">
+    <button type="button" class="sec" id="fw_upload">Upload &amp; install</button>
+    <progress id="fw_prog" max="100" value="0" hidden style="flex:1;min-width:120px"></progress>
+    <span id="fw_msg" class="hint"></span>
+  </div>
+  <div class="hint">Select <code>build/dmx_bridge.bin</code>. The bridge restarts into the new firmware and
+    rolls back automatically if it fails to start. DMX output may stutter during the upload.</div>
+</section>
+
 <div class="actions card">
   <button type="submit">Save</button>
   <button type="button" class="sec" id="reboot">Restart</button>
@@ -164,6 +179,7 @@ async function poll() {
     $('s_pps').textContent = `${d.artnet_pps} / ${d.sacn_pps}`;
     $('s_fps').textContent = d.fps;
     $('s_up').textContent = fmtUp(s.uptime);
+    $('fw_info').textContent = `Running v${s.fw} from partition ${s.partition}`;
     for (let i = 0; i < 512; i++) {
       const v = parseInt(d.values.substr(i * 2, 2), 16);
       bars[i][1].style.height = (v / 2.55) + '%';
@@ -213,6 +229,28 @@ $('reset').onclick = async () => {
     setTimeout(() => { resetArmed = false; $('reset').textContent = 'Factory reset'; }, 4000); return; }
   await fetch('/api/factory_reset', {method: 'POST'});
   msg('Settings erased – the bridge restarts in provisioning (AP) mode.');
+};
+
+$('fw_upload').onclick = () => {
+  const f = $('fw_file').files[0], m = $('fw_msg'), pr = $('fw_prog');
+  const say = (t, bad) => { m.textContent = t; m.style.color = bad ? 'var(--bad)' : ''; };
+  if (!f) return say('Choose a .bin file first', true);
+  if (!f.name.endsWith('.bin')) return say('Expected a .bin firmware file', true);
+  const x = new XMLHttpRequest();
+  x.open('POST', '/api/ota');
+  x.setRequestHeader('Content-Type', 'application/octet-stream');
+  x.upload.onprogress = e => { if (e.lengthComputable) { pr.value = e.loaded / e.total * 100;
+    say(e.loaded < e.total ? `Uploading ${Math.round(pr.value)}%` : 'Verifying…'); } };
+  x.onload = () => {
+    $('fw_upload').disabled = false;
+    let r = {}; try { r = JSON.parse(x.responseText); } catch (e) {}
+    if (x.status === 200 && r.ok) {
+      say('Installed – restarting…'); setTimeout(() => location.reload(), 10000);
+    } else { pr.hidden = true; say(r.error || `Upload failed (HTTP ${x.status})`, true); }
+  };
+  x.onerror = () => { $('fw_upload').disabled = false; pr.hidden = true; say('Upload failed (connection lost)', true); };
+  $('fw_upload').disabled = true; pr.hidden = false; pr.value = 0; say('Uploading…');
+  x.send(f);
 };
 
 loadConfig();

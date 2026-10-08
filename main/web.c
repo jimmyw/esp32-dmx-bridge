@@ -9,6 +9,7 @@
 #include "esp_app_desc.h"
 #include "esp_http_server.h"
 #include "esp_log.h"
+#include "esp_ota_ops.h"
 #include "esp_system.h"
 #include "esp_timer.h"
 #include "freertos/FreeRTOS.h"
@@ -101,6 +102,8 @@ static esp_err_t status_get(httpd_req_t *req)
     cJSON_AddStringToObject(r, "hostname", g_config.hostname);
     cJSON_AddNumberToObject(r, "uptime", (double)(now / 1000000));
     cJSON_AddNumberToObject(r, "heap", esp_get_free_heap_size());
+    const esp_partition_t *running = esp_ota_get_running_partition();
+    cJSON_AddStringToObject(r, "partition", running ? running->label : "");
 
     cJSON *w = cJSON_AddObjectToObject(r, "wifi");
     cJSON_AddBoolToObject(w, "sta", wifi_mgr_sta_connected());
@@ -385,6 +388,89 @@ static esp_err_t factory_reset_post(httpd_req_t *req)
     return reboot_post(req);
 }
 
+// Firmware upload: the request body is the raw dmx_bridge.bin.
+static esp_err_t ota_post(httpd_req_t *req)
+{
+    const esp_partition_t *part = esp_ota_get_next_update_partition(NULL);
+    if (!part) {
+        return send_error(req, "no OTA partition");
+    }
+    if (req->content_len <= 0 || req->content_len > part->size) {
+        return send_error(req, "firmware size invalid or larger than the app partition");
+    }
+    ESP_LOGI(TAG, "OTA: %d bytes -> %s", req->content_len, part->label);
+
+    char *buf = malloc(4096);
+    if (!buf) {
+        return httpd_resp_send_500(req);
+    }
+    esp_ota_handle_t ota = 0;
+    const char *err = NULL;
+    int remaining = req->content_len;
+    bool started = false;
+
+    while (remaining > 0) {
+        int n = httpd_req_recv(req, buf, remaining < 4096 ? remaining : 4096);
+        if (n == HTTPD_SOCK_ERR_TIMEOUT) {
+            continue;
+        }
+        if (n <= 0) {
+            err = "upload interrupted";
+            break;
+        }
+        if (!started) {
+            // First chunk: check this is an app image for this chip before erasing anything.
+            const size_t desc_off = sizeof(esp_image_header_t) + sizeof(esp_image_segment_header_t);
+            if (n < desc_off + sizeof(esp_app_desc_t)) {
+                err = "file too small";
+                break;
+            }
+            const esp_image_header_t *hdr = (const esp_image_header_t *)buf;
+            const esp_app_desc_t *desc = (const esp_app_desc_t *)(buf + desc_off);
+            if (hdr->magic != ESP_IMAGE_HEADER_MAGIC || desc->magic_word != ESP_APP_DESC_MAGIC_WORD) {
+                err = "not an ESP32 application image (use build/dmx_bridge.bin)";
+                break;
+            }
+            if (hdr->chip_id != CONFIG_IDF_FIRMWARE_CHIP_ID) {
+                err = "firmware is built for a different chip";
+                break;
+            }
+            ESP_LOGI(TAG, "OTA: image \"%s\" version %s", desc->project_name, desc->version);
+            if (esp_ota_begin(part, OTA_WITH_SEQUENTIAL_WRITES, &ota) != ESP_OK) {
+                err = "esp_ota_begin failed";
+                break;
+            }
+            started = true;
+        }
+        if (esp_ota_write(ota, buf, n) != ESP_OK) {
+            err = "flash write failed";
+            break;
+        }
+        remaining -= n;
+    }
+    free(buf);
+
+    if (started) {
+        if (err) {
+            esp_ota_abort(ota);
+        } else if (esp_ota_end(ota) != ESP_OK) {
+            err = "image verification failed";
+        } else if (esp_ota_set_boot_partition(part) != ESP_OK) {
+            err = "could not set boot partition";
+        }
+    }
+    if (err) {
+        ESP_LOGW(TAG, "OTA failed: %s", err);
+        return send_error(req, err);
+    }
+    ESP_LOGI(TAG, "OTA done, restarting into %s", part->label);
+    cJSON *r = cJSON_CreateObject();
+    cJSON_AddBoolToObject(r, "ok", true);
+    esp_err_t res = send_json(req, r);
+    schedule_restart(1000);
+    return res;
+}
+
 // Anything else (captive-portal probes such as /generate_204, /hotspot-detect.html) -> portal.
 static esp_err_t redirect_get(httpd_req_t *req)
 {
@@ -406,6 +492,7 @@ esp_err_t web_start(void)
     cfg.lru_purge_enable = true;
     cfg.uri_match_fn = httpd_uri_match_wildcard;
     cfg.core_id = 0;
+    cfg.recv_wait_timeout = 15;
 
     httpd_handle_t server;
     esp_err_t err = httpd_start(&server, &cfg);
@@ -421,6 +508,7 @@ esp_err_t web_start(void)
         { .uri = "/api/scan",          .method = HTTP_GET,  .handler = scan_get },
         { .uri = "/api/reboot",        .method = HTTP_POST, .handler = reboot_post },
         { .uri = "/api/factory_reset", .method = HTTP_POST, .handler = factory_reset_post },
+        { .uri = "/api/ota",           .method = HTTP_POST, .handler = ota_post },
         { .uri = "/*",                 .method = HTTP_GET,  .handler = redirect_get },
     };
     for (size_t i = 0; i < sizeof(uris) / sizeof(uris[0]); i++) {

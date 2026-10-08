@@ -84,8 +84,14 @@ Art-Net counts as priority 100.
   allows about 44 Hz).
 * **Hardware:** TX/DE/LED GPIOs, UART. Pin, Wi-Fi and hostname changes restart the bridge.
 
+* **Firmware:** upload a new `build/dmx_bridge.bin` from the browser. It is written to the
+  inactive OTA slot, verified, and booted. If the new firmware crashes before it finishes
+  starting, the bootloader rolls back to the previous one on the next reset.
+
 JSON API: `GET /api/status`, `GET/POST /api/config`, `GET /api/scan`, `POST /api/reboot`,
-`POST /api/factory_reset`.
+`POST /api/factory_reset`,
+`POST /api/ota` (raw `.bin` as the body, e.g.
+`curl --data-binary @build/dmx_bridge.bin http://dmx-bridge-XXXX.local/api/ota`).
 
 ## Testing without QLC+
 

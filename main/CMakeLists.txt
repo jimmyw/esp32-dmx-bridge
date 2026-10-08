@@ -4,5 +4,5 @@ idf_component_register(
     INCLUDE_DIRS "."
     EMBED_TXTFILES "web/index.html"
     PRIV_REQUIRES nvs_flash esp_wifi esp_netif esp_event esp_http_server
-                  esp_driver_uart esp_driver_gpio esp_app_format lwip esp_timer
+                  esp_driver_uart esp_driver_gpio esp_app_format app_update lwip esp_timer
 )

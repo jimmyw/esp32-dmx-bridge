@@ -5,6 +5,7 @@
 #include "driver/gpio.h"
 #include "esp_app_desc.h"
 #include "esp_log.h"
+#include "esp_ota_ops.h"
 #include "esp_system.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
@@ -94,4 +95,13 @@ void app_main(void)
     ESP_ERROR_CHECK(sacn_start());
     ESP_ERROR_CHECK(web_start());
     xTaskCreate(ui_task, "ui", 3072, NULL, 3, NULL);
+
+    // Everything came up: confirm a freshly uploaded firmware so the bootloader keeps it.
+    // If it crashes before reaching this point, the next reset rolls back to the old one.
+    esp_ota_img_states_t state;
+    if (esp_ota_get_state_partition(esp_ota_get_running_partition(), &state) == ESP_OK &&
+        state == ESP_OTA_IMG_PENDING_VERIFY) {
+        ESP_LOGI(TAG, "new firmware booted OK, cancelling rollback");
+        esp_ota_mark_app_valid_cancel_rollback();
+    }
 }
