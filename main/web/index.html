@@ -1,0 +1,223 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>DMX Bridge</title>
+<style>
+:root{--bg:#f4f4f2;--card:#fff;--fg:#1d1d1f;--mut:#6b6b70;--line:#e2e2e0;--acc:#2f6fdf;--ok:#1f9d55;--bad:#c63b3b}
+@media (prefers-color-scheme:dark){:root{--bg:#141416;--card:#1e1e21;--fg:#ececee;--mut:#9a9aa2;--line:#2e2e33;--acc:#5b8ff0;--ok:#3cc47a;--bad:#e06464}}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--fg);font:15px/1.4 system-ui,-apple-system,Segoe UI,Roboto,sans-serif}
+main{max-width:860px;margin:0 auto;padding:16px}
+h1{font-size:20px;margin:4px 0 12px;display:flex;align-items:center;gap:10px;flex-wrap:wrap}
+h2{font-size:14px;text-transform:uppercase;letter-spacing:.05em;color:var(--mut);margin:0 0 10px}
+.card{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:14px;margin-bottom:14px}
+.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px}
+.stat b{display:block;font-size:17px;font-variant-numeric:tabular-nums}
+.stat span{color:var(--mut);font-size:12px}
+.dot{width:10px;height:10px;border-radius:50%;display:inline-block;background:var(--mut)}
+.dot.on{background:var(--ok)}
+label{display:block;font-size:13px;color:var(--mut);margin-bottom:3px}
+input,select{width:100%;padding:8px;border:1px solid var(--line);border-radius:6px;background:var(--bg);color:var(--fg);font:inherit}
+.row{display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:10px;margin-bottom:10px}
+.hint{font-size:12px;color:var(--mut);margin-top:3px}
+button{padding:9px 14px;border:0;border-radius:6px;background:var(--acc);color:#fff;font:inherit;cursor:pointer}
+button.sec{background:transparent;color:var(--fg);border:1px solid var(--line)}
+button.danger{background:var(--bad)}
+.actions{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
+#msg{font-size:13px}
+#chan{display:grid;grid-template-columns:repeat(32,1fr);gap:1px;margin-top:6px}
+#chan div{height:18px;background:var(--line);position:relative}
+#chan div i{position:absolute;left:0;right:0;bottom:0;background:var(--acc)}
+@media (max-width:560px){#chan{grid-template-columns:repeat(16,1fr)}}
+.pill{font-size:12px;padding:2px 8px;border-radius:99px;border:1px solid var(--line);color:var(--mut);font-weight:400}
+</style>
+</head>
+<body>
+<main>
+<h1><span id="t_name">DMX Bridge</span> <span class="pill" id="t_fw"></span></h1>
+
+<section class="card">
+  <h2>Status</h2>
+  <div class="grid">
+    <div class="stat"><span>Wi-Fi</span><b id="s_wifi">–</b></div>
+    <div class="stat"><span>IP / host</span><b id="s_ip">–</b></div>
+    <div class="stat"><span>DMX input</span><b><i class="dot" id="s_dot"></i> <span id="s_src">–</span></b></div>
+    <div class="stat"><span>Packets/s (Art-Net / sACN)</span><b id="s_pps">–</b></div>
+    <div class="stat"><span>DMX frames/s</span><b id="s_fps">–</b></div>
+    <div class="stat"><span>Uptime</span><b id="s_up">–</b></div>
+  </div>
+  <div id="chan" title="DMX output, 512 channels"></div>
+  <div class="hint" id="chan_hint">Output channels 1–512 (hover for value)</div>
+</section>
+
+<form id="f">
+<section class="card">
+  <h2>Wi-Fi</h2>
+  <div class="row">
+    <div><label for="wifi_ssid">Network (SSID)</label>
+      <input id="wifi_ssid" name="wifi_ssid" list="ssids" autocomplete="off">
+      <datalist id="ssids"></datalist></div>
+    <div><label for="wifi_pass">Password</label>
+      <input id="wifi_pass" name="wifi_pass" type="password" autocomplete="new-password">
+      <div class="hint" id="pass_hint"></div></div>
+  </div>
+  <div class="actions"><button type="button" class="sec" id="scan">Scan networks</button><span class="hint" id="scan_msg"></span></div>
+</section>
+
+<section class="card">
+  <h2>DMX input</h2>
+  <div class="row">
+    <div><label for="protocol">Protocol</label>
+      <select id="protocol" name="protocol">
+        <option value="3">Art-Net + sACN</option><option value="1">Art-Net only</option><option value="2">sACN (E1.31) only</option>
+      </select></div>
+    <div><label for="artnet_universe">Art-Net universe (port-address)</label>
+      <input id="artnet_universe" name="artnet_universe" type="number" min="0" max="32767">
+      <div class="hint" id="art_hint"></div></div>
+    <div><label for="sacn_universe">sACN universe</label>
+      <input id="sacn_universe" name="sacn_universe" type="number" min="1" max="63999"></div>
+  </div>
+  <div class="row">
+    <div><label for="on_loss">On signal loss</label>
+      <select id="on_loss" name="on_loss"><option value="0">Hold last look</option><option value="1">Blackout</option></select></div>
+    <div><label for="loss_timeout_ms">Loss timeout (ms)</label>
+      <input id="loss_timeout_ms" name="loss_timeout_ms" type="number" min="500" max="60000" step="100"></div>
+    <div><label for="refresh_hz">DMX refresh (Hz)</label>
+      <input id="refresh_hz" name="refresh_hz" type="number" min="1" max="44"></div>
+  </div>
+</section>
+
+<section class="card">
+  <h2>Device &amp; hardware</h2>
+  <div class="row">
+    <div><label for="name">Name</label><input id="name" name="name" maxlength="63"></div>
+    <div><label for="hostname">Hostname (.local)</label><input id="hostname" name="hostname" maxlength="31"></div>
+  </div>
+  <div class="row">
+    <div><label for="tx_pin">DMX TX GPIO</label><input id="tx_pin" name="tx_pin" type="number" min="0" max="48"></div>
+    <div><label for="de_pin">RS485 DE GPIO</label><input id="de_pin" name="de_pin" type="number" min="-1" max="48">
+      <div class="hint">-1 = auto-direction module</div></div>
+    <div><label for="uart">UART</label><select id="uart" name="uart"><option>1</option><option>2</option></select></div>
+    <div><label for="led_pin">Status LED GPIO</label><input id="led_pin" name="led_pin" type="number" min="-1" max="48">
+      <div class="hint">-1 = none</div></div>
+  </div>
+  <div class="hint">Wi-Fi, hostname and pin changes restart the bridge.</div>
+</section>
+
+<div class="actions card">
+  <button type="submit">Save</button>
+  <button type="button" class="sec" id="reboot">Restart</button>
+  <button type="button" class="danger" id="reset">Factory reset</button>
+  <span id="msg"></span>
+</div>
+</form>
+</main>
+
+<script>
+const $ = id => document.getElementById(id);
+const fields = ['wifi_ssid','protocol','artnet_universe','sacn_universe','on_loss','loss_timeout_ms',
+                'refresh_hz','name','hostname','tx_pin','de_pin','uart','led_pin'];
+const numeric = new Set(['protocol','artnet_universe','sacn_universe','on_loss','loss_timeout_ms',
+                         'refresh_hz','tx_pin','de_pin','uart','led_pin']);
+let resetArmed = false;
+
+const chan = $('chan'), bars = [];
+for (let i = 0; i < 512; i++) {
+  const d = document.createElement('div'), b = document.createElement('i');
+  d.appendChild(b); chan.appendChild(d); bars.push([d, b]);
+}
+
+function msg(t, bad) { $('msg').textContent = t; $('msg').style.color = bad ? 'var(--bad)' : 'var(--ok)'; }
+
+function artHint() {
+  const v = +$('artnet_universe').value || 0;
+  $('art_hint').textContent = `Net ${v >> 8} · Sub ${(v >> 4) & 15} · Uni ${v & 15} (QLC+ universe ${v})`;
+}
+$('artnet_universe').addEventListener('input', artHint);
+
+function fmtUp(s) {
+  const d = Math.floor(s / 86400), h = Math.floor(s / 3600) % 24, m = Math.floor(s / 60) % 60;
+  return (d ? d + 'd ' : '') + h + 'h ' + m + 'm';
+}
+
+async function loadConfig() {
+  const c = await (await fetch('/api/config')).json();
+  for (const k of fields) if (k in c) $(k).value = c[k];
+  $('wifi_pass').value = '';
+  $('pass_hint').textContent = c.wifi_pass_set ? 'Saved – leave empty to keep' : '';
+  artHint();
+}
+
+async function poll() {
+  try {
+    const s = await (await fetch('/api/status')).json();
+    $('t_name').textContent = s.name; document.title = s.name; $('t_fw').textContent = 'v' + s.fw;
+    const w = s.wifi;
+    $('s_wifi').textContent = w.sta ? `${w.ssid} (${w.rssi} dBm)` : (w.ap ? `AP: ${w.ap_ssid}` : 'connecting…');
+    $('s_ip').textContent = w.sta ? `${w.ip} · ${s.hostname}.local` : (w.ap ? '192.168.4.1' : '–');
+    const d = s.dmx;
+    $('s_dot').className = 'dot' + (d.signal ? ' on' : '');
+    $('s_src').textContent = d.signal ? `${d.source === 'sacn' ? 'sACN' : 'Art-Net'} ${d.source_ip}` +
+      (d.source === 'sacn' ? ` p${d.priority}` : '') + (d.sources > 1 ? ` (+${d.sources - 1})` : '') : 'no signal';
+    $('s_pps').textContent = `${d.artnet_pps} / ${d.sacn_pps}`;
+    $('s_fps').textContent = d.fps;
+    $('s_up').textContent = fmtUp(s.uptime);
+    for (let i = 0; i < 512; i++) {
+      const v = parseInt(d.values.substr(i * 2, 2), 16);
+      bars[i][1].style.height = (v / 2.55) + '%';
+      bars[i][0].title = `Ch ${i + 1}: ${v}`;
+    }
+  } catch (e) {
+    $('s_wifi').textContent = 'offline';
+  }
+}
+
+$('scan').onclick = async () => {
+  $('scan_msg').textContent = 'Scanning…';
+  try {
+    const list = await (await fetch('/api/scan')).json();
+    $('ssids').innerHTML = '';
+    for (const n of list) {
+      const o = document.createElement('option');
+      o.value = n.ssid; o.label = `${n.rssi} dBm · ch ${n.ch}${n.secure ? ' · 🔒' : ''}`;
+      $('ssids').appendChild(o);
+    }
+    $('scan_msg').textContent = list.length ? `${list.length} networks – pick one in the SSID field` : 'No networks found';
+  } catch (e) { $('scan_msg').textContent = 'Scan failed'; }
+};
+
+$('f').onsubmit = async ev => {
+  ev.preventDefault();
+  const body = {};
+  for (const k of fields) body[k] = numeric.has(k) ? +$(k).value : $(k).value;
+  const p = $('wifi_pass').value;
+  if (p) body.wifi_pass = p;
+  try {
+    const r = await (await fetch('/api/config', {method: 'POST', headers: {'Content-Type': 'application/json'},
+                                                 body: JSON.stringify(body)})).json();
+    if (!r.ok) return msg(r.error || 'Error', true);
+    msg(r.reboot ? 'Saved – restarting…' : 'Saved');
+    if (r.reboot) setTimeout(() => location.reload(), 8000); else loadConfig();
+  } catch (e) { msg('Save failed', true); }
+};
+
+$('reboot').onclick = async () => {
+  await fetch('/api/reboot', {method: 'POST'}); msg('Restarting…');
+  setTimeout(() => location.reload(), 8000);
+};
+
+$('reset').onclick = async () => {
+  if (!resetArmed) { resetArmed = true; $('reset').textContent = 'Click again to erase all settings';
+    setTimeout(() => { resetArmed = false; $('reset').textContent = 'Factory reset'; }, 4000); return; }
+  await fetch('/api/factory_reset', {method: 'POST'});
+  msg('Settings erased – the bridge restarts in provisioning (AP) mode.');
+};
+
+loadConfig();
+poll();
+setInterval(poll, 1000);
+</script>
+</body>
+</html>

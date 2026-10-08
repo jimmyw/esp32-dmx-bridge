@@ -1,0 +1,32 @@
+menu "DMX Bridge"
+
+    config DMX_TX_PIN
+        int "Default DMX TX GPIO (to RS485 module TXD/DI)"
+        default 17
+
+    config DMX_DE_PIN
+        int "Default RS485 DE/RE GPIO (-1 = auto-direction module)"
+        default -1
+
+    config DMX_UART_NUM
+        int "UART used for DMX"
+        range 1 2
+        default 1
+
+    config DMX_AP_PASSWORD
+        string "Provisioning AP password (empty = open, else >= 8 chars)"
+        default "dmxbridge"
+
+    config DMX_HOSTNAME_PREFIX
+        string "Hostname prefix (MAC suffix is appended)"
+        default "dmx-bridge"
+
+    config DMX_RESET_GPIO
+        int "Factory-reset button GPIO (hold 5 s)"
+        default 0
+
+    config DMX_LED_PIN
+        int "Default status LED GPIO (-1 = none)"
+        default -1
+
+endmenu
