@@ -7,7 +7,8 @@ receives one universe of Art-Net or sACN and sends it out as DMX512 through an R
 
 | ESP32-S3        | RS485 module | DMX XLR      |
 |-----------------|--------------|--------------|
-| GPIO17 (TX)     | TXD          |              |
+| GPIO17 (TX)     | RXD          |              |
+| (unused)        | TXD          |              |
 | 3V3             | VCC          |              |
 | GND             | GND          | pin 1 (GND)  |
 |                 | A            | pin 3 (D+)   |
@@ -15,7 +16,8 @@ receives one universe of Art-Net or sACN and sends it out as DMX512 through an R
 
 * The module switches direction by itself, so there is no DE pin (`DE GPIO = -1`). If you use a
   plain MAX485 board instead, wire DE+RE together to a GPIO and set it in the web UI.
-* Module labels vary: if fixtures get no signal, move GPIO17 to the module's other data pin.
+* TX → RXD is the usual UART crossover: the module's RXD is its input, which it drives onto A/B.
+  The firmware only transmits, so the module's TXD (its output) can stay unconnected.
 * An auto-direction module drives "0" bits hard but "1" bits only through its bias resistors. Put
   a 120 Ω terminator on the last fixture. If long cable runs are still unreliable, use a
   DE-controlled MAX485/MAX3485 board.
