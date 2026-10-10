@@ -15,11 +15,12 @@
 static const char *TAG = "config";
 static const char *NVS_NS = "bridge";
 static const char *NVS_KEY = "cfg";
-#define CONFIG_VERSION 3
+#define CONFIG_VERSION 4
 // Each version appended fields: v1 ended at loss_timeout_ms, v2 added the microphone, v3 the beat
-// offset. An older blob is a prefix (plus padding) of the current struct.
+// offset, v4 the fallback tempo. An older blob is a prefix (plus padding) of the current struct.
 static const size_t s_version_size[CONFIG_VERSION + 1] = {
-    0, offsetof(bridge_config_t, mic_sck), offsetof(bridge_config_t, beat_offset_ms), sizeof(bridge_config_t),
+    0, offsetof(bridge_config_t, mic_sck), offsetof(bridge_config_t, beat_offset_ms),
+    offsetof(bridge_config_t, fallback_bpm), sizeof(bridge_config_t),
 };
 
 typedef struct {
@@ -78,6 +79,7 @@ static void set_defaults(void)
     g_config.mic_sd           = CONFIG_DMX_MIC_SD_PIN;
     g_config.mic_gate         = 75;
     g_config.beat_sens        = 14;
+    g_config.fallback_bpm     = 120;
 }
 
 static void sanitize(void)
@@ -97,6 +99,7 @@ static void sanitize(void)
     if (g_config.mic_gate < 20 || g_config.mic_gate > 100) g_config.mic_gate = 75;
     if (g_config.beat_sens < 10 || g_config.beat_sens > 40) g_config.beat_sens = 14;
     if (g_config.beat_offset_ms < -300 || g_config.beat_offset_ms > 300) g_config.beat_offset_ms = 0;
+    if (g_config.fallback_bpm != 0 && (g_config.fallback_bpm < 60 || g_config.fallback_bpm > 200)) g_config.fallback_bpm = 120;
     if (g_config.hostname[0] == '\0') {
         snprintf(g_config.hostname, sizeof(g_config.hostname), "%s-%s",
                  CONFIG_DMX_HOSTNAME_PREFIX, s_mac_suffix);
@@ -177,7 +180,8 @@ esp_err_t config_factory_reset(void)
 const char *const CONFIG_KEYS[] = {
     "wifi_ssid", "wifi_pass", "hostname", "name", "protocol", "artnet_universe",
     "sacn_universe", "tx_pin", "de_pin", "led_pin", "uart", "refresh_hz", "on_loss",
-    "loss_timeout_ms", "mic_sck", "mic_ws", "mic_sd", "mic_gate", "beat_sens", "beat_offset_ms", NULL,
+    "loss_timeout_ms", "mic_sck", "mic_ws", "mic_sd", "mic_gate", "beat_sens", "beat_offset_ms",
+    "fallback_bpm", NULL,
 };
 
 static bool parse_int(const char *s, int lo, int hi, int *out)
@@ -266,6 +270,9 @@ const char *config_set_field(bridge_config_t *c, const char *key, const char *va
     } else if (strcmp(key, "beat_sens") == 0) {
         if (!parse_int(value, 10, 40, &v)) return "beat sensitivity must be 10-40";
         c->beat_sens = v;
+    } else if (strcmp(key, "fallback_bpm") == 0) {
+        if (!parse_int(value, 0, 200, &v) || (v != 0 && v < 60)) return "fallback tempo must be 60-200 BPM, or 0 = off";
+        c->fallback_bpm = v;
     } else if (strcmp(key, "beat_offset_ms") == 0) {
         if (!parse_int(value, -300, 300, &v)) return "beat offset must be -300..300 ms";
         c->beat_offset_ms = v;

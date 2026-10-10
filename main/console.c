@@ -23,7 +23,8 @@ static const char *TAG = "console";
  *                     text "audio" subscribes to audio frames for ~5 s (clients repeat it).
  *   server -> client: every PUSH_MS: [0x01][master][manual x512][output x512]
  *                     text "names" / "scenes" / "scripts" when those changed (clients re-fetch).
- *                     to audio subscribers, every PUSH_MS: [0x02][flags: 1 mic, 2 demo, 4 signal]
+ *                     to audio subscribers, every PUSH_MS: [0x02][flags: 1 mic, 2 demo playing,
+ *                     4 signal, 8 locked, 16 demo forced]
  *                     [level][bass][mid][high] (0-255) [beats u16 LE][bpm x10 u16 LE][phase 0-255]
  *                     [dB + 100][bands x16][spectrum x32]
  */
@@ -131,7 +132,7 @@ static size_t audio_frame(uint8_t *p)
     int64_t now = esp_timer_get_time();
     uint8_t *q = p;
     *q++ = 0x02;
-    *q++ = (a.mic ? 1 : 0) | (a.demo ? 2 : 0) | (a.signal ? 4 : 0);
+    *q++ = (a.mic ? 1 : 0) | (a.demo ? 2 : 0) | (a.signal ? 4 : 0) | (a.locked ? 8 : 0) | (a.demo_forced ? 16 : 0);
     *q++ = (uint8_t)(a.level * 255 + 0.5f);
     *q++ = (uint8_t)(a.bass * 255 + 0.5f);
     *q++ = (uint8_t)(a.mid * 255 + 0.5f);

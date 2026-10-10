@@ -13,7 +13,7 @@ const BANDS = 16, SPECTRUM = 32;
 function parse(d) {
   if (d[0] !== 2 || d.length < 12 + BANDS + SPECTRUM) return null;
   return {
-    mic: !!(d[1] & 1), demo: !!(d[1] & 2), signal: !!(d[1] & 4),
+    mic: !!(d[1] & 1), demo: !!(d[1] & 2), signal: !!(d[1] & 4), locked: !!(d[1] & 8), forced: !!(d[1] & 16),
     level: d[2] / 255, bass: d[3] / 255, mid: d[4] / 255, high: d[5] / 255,
     beats: d[6] | (d[7] << 8), bpm: (d[8] | (d[9] << 8)) / 10, phase: d[10] / 255, db: d[11] - 100,
     bands: d.slice(12, 12 + BANDS), spectrum: d.slice(12 + BANDS, 12 + BANDS + SPECTRUM),
@@ -118,38 +118,48 @@ function PhaseRing({ phase, on }) {
   );
 }
 
-// Beat offset (config beat_offset_ms): shifts the whole beat grid, so lights that react late can
-// be pulled onto the music. Saved when the slider is let go.
-function OffsetSlider() {
+// A slider for one config value, saved when let go. fmt(v) -> [value text, hint text];
+// fromCfg/toCfg map between the stored value and the slider's.
+const same = v => v;
+function ConfigSlider({ name, label, min, max, step, fmt, reset, title, config, fromCfg = same, toCfg = same }) {
   const [v, setV] = useState(null);
   const [msg, setMsg] = useState('');
-  useEffect(() => { getJson('/api/config').then(c => setV(c.beat_offset_ms ?? 0)).catch(() => {}); }, []);
+  useEffect(() => { if (config && v === null) setV(fromCfg(config[name] ?? reset)); }, [config]);
   if (v === null) return null;
   const save = async x => {
     try {
-      const r = await postJson('/api/config', { beat_offset_ms: x });
+      const r = await postJson('/api/config', { [name]: toCfg(x) });
       setMsg(r.ok ? '' : r.error || 'save failed');
     } catch (e) { setMsg('save failed'); }
   };
+  const [text, hint] = fmt(v);
   return (
-    <label class="offset" title="move the beat earlier (+) to make up for lights that react late, or later (-)">
-      <span class="mn">Offset</span>
-      <input type="range" min="-300" max="300" step="5" value={v}
+    <label class="cslider" title={title}>
+      <span class="mn">{label}</span>
+      <input type="range" min={min} max={max} step={step} value={v}
              onInput={e => setV(+e.currentTarget.value)} onChange={e => save(+e.currentTarget.value)} />
-      <span class="ov">{v > 0 ? '+' : ''}{v} ms</span>
-      <span class="hint">{msg || (v > 0 ? 'beats earlier' : v < 0 ? 'beats later' : 'no shift')}</span>
-      {v !== 0 && <button type="button" class="sec small" onClick={() => { setV(0); save(0); }}>0</button>}
+      <span class="ov">{text}</span>
+      <span class="hint">{msg || hint}</span>
+      {v !== reset && <button type="button" class="sec small" onClick={() => { setV(reset); save(reset); }}>{reset}</button>}
     </label>
   );
 }
 
+// Offset: shifts the whole beat grid, so lights that react late can be pulled onto the music.
+const offsetFmt = v => [`${v > 0 ? '+' : ''}${v} ms`, v > 0 ? 'beats earlier' : v < 0 ? 'beats later' : 'no shift'];
+// Demo tempo: the demo track's tempo, which also plays by itself when the microphone hears nothing
+// (and keeps the beat when it hears sound without one). Left end = off: silence stays silent.
+const demoFmt = v => (v < 60 ? ['off', 'silence stays silent'] : [`${v} BPM`, 'when nothing is heard']);
+
 export function Audio() {
   const frame = useAudioFrames();
   const [info, setInfo] = useState(null);   // /api/audio: mic_data (is the mic sending?)
+  const [config, setConfig] = useState(null);
+  useEffect(() => { getJson('/api/config').then(setConfig).catch(() => {}); }, []);
   const [busy, setBusy] = useState(false);
   useInterval(async () => { try { setInfo(await getJson('/api/audio')); } catch (e) {} }, 3000);
 
-  const f = frame || { mic: false, demo: false, signal: false, level: 0, bass: 0, mid: 0, high: 0, bpm: 0, phase: 0, db: -100 };
+  const f = frame || { mic: false, demo: false, forced: false, signal: false, level: 0, bass: 0, mid: 0, high: 0, bpm: 0, phase: 0, db: -100 };
   const demo = async on => {
     setBusy(true);
     try { setInfo(await postJson('/api/audio', { demo: on })); } catch (e) {}
@@ -157,7 +167,8 @@ export function Audio() {
   };
 
   let state;
-  if (f.demo) state = 'Demo track (120 BPM)';
+  if (f.forced) state = 'Demo track';
+  else if (f.demo) state = f.mic ? 'Demo track – the microphone hears nothing' : 'Demo track – no microphone';
   else if (!f.mic) state = 'No microphone – set its pins in Settings';
   else if (info && !info.mic_data) state = 'Microphone sends no data – check the wiring';
   else if (!f.signal) state = `Quiet (${f.db.toFixed(0)} dBFS, below the noise gate)`;
@@ -169,9 +180,9 @@ export function Audio() {
         <h2>Sound</h2>
         <span class="hint astate">{state}</span>
         <span class="sp" />
-        <button type="button" class={'sec small' + (f.demo ? ' on' : '')} disabled={busy}
-                title="a synthesized 120 BPM track instead of the microphone, to try effects"
-                onClick={() => demo(!f.demo)}>{f.demo ? 'Stop demo' : 'Demo'}</button>
+        <button type="button" class={'sec small' + (f.forced ? ' on' : '')} disabled={busy}
+                title="play the demo track instead of the microphone, at the demo tempo"
+                onClick={() => demo(!f.forced)}>{f.forced ? 'Stop demo' : 'Demo'}</button>
       </div>
       <Spectrum frame={frame} />
       <div class="audio-row">
@@ -183,10 +194,15 @@ export function Audio() {
         </div>
         <div class="tempo" title="tempo from the beats; the ring fills once per beat">
           <PhaseRing phase={f.phase} on={f.bpm > 0} />
-          <span class="bpm">{f.bpm > 0 ? Math.round(f.bpm) : '–'}<small>BPM</small></span>
+          <span class="bpm">{f.bpm > 0 ? Math.round(f.bpm) : '–'}
+            <small>{f.demo ? 'BPM demo' : f.bpm > 0 && !f.locked ? 'BPM (no beat)' : 'BPM'}</small></span>
         </div>
       </div>
-      <OffsetSlider />
+      <ConfigSlider name="beat_offset_ms" label="Offset" min={-300} max={300} step={5} reset={0} fmt={offsetFmt}
+                    config={config} title="move the beat earlier (+) to make up for lights that react late, or later (-)" />
+      <ConfigSlider name="fallback_bpm" label="Demo" min={55} max={200} step={1} reset={120} fmt={demoFmt}
+                    config={config} fromCfg={c => (c ? c : 55)} toCfg={x => (x < 60 ? 0 : x)}
+                    title="the demo track's tempo; it plays by itself when the microphone hears nothing (left end = off)" />
     </section>
   );
 }

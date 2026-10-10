@@ -105,6 +105,7 @@ static int cmd_config(int argc, char **argv)
     printf("mic_gate        = %u  (-%u dBFS)\n", c->mic_gate, c->mic_gate);
     printf("beat_sens       = %u  (x%.1f)\n", c->beat_sens, c->beat_sens / 10.0);
     printf("beat_offset_ms  = %d  (beats %s)\n", c->beat_offset_ms, c->beat_offset_ms >= 0 ? "earlier" : "later");
+    printf("fallback_bpm    = %u%s\n", c->fallback_bpm, c->fallback_bpm ? "" : "  (off)");
     return 0;
 }
 
@@ -140,10 +141,12 @@ static int cmd_audio(int argc, char **argv)
     }
     audio_state_t a;
     audio_get(&a);
-    printf("mic %s%s, input %.1f dBFS%s\n", a.mic ? "on" : "not configured", a.demo ? " (demo)" : "",
+    printf("mic %s%s, input %.1f dBFS%s\n", a.mic ? "on" : "not configured",
+           a.demo ? (a.demo_forced ? " (demo)" : " (demo: nothing heard)") : "",
            a.db, a.signal ? "" : " (below gate)");
     printf("level %.2f  bass %.2f  mid %.2f  high %.2f\n", a.level, a.bass, a.mid, a.high);
-    printf("beats %lu  bpm %.1f\n", (unsigned long)a.beats, a.bpm);
+    printf("beats %lu  bpm %.1f%s\n", (unsigned long)a.beats, a.bpm,
+           a.bpm <= 0 ? "" : a.locked ? " (from the music)" : " (fallback)");
     return 0;
 }
 

@@ -3,7 +3,8 @@
 #include "esp_err.h"
 
 // The board's addressable RGB LED (CONFIG_DMX_RGB_LED_PIN, a WS2812, usually on GPIO 48) flashes on every beat of the audio analysis, so the beat lock can be checked by eye:
-// green = locked to a tempo, blue = onsets only (no tempo yet), purple tint = demo, off = silence.
+// green = locked to the tempo, amber = a beat at the demo tempo with no tempo in the sound, blue =
+// onsets only, purple tint = the demo track plays, off = nothing to show.
 esp_err_t beat_led_start(void);
 
 // Diagnostics (serial `rgbled`): show a fixed colour for `ms` instead of the beat (0 = back to the

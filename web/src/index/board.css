@@ -58,8 +58,8 @@ main.board{max-width:960px}
 .ring .rfg{stroke:var(--acc);stroke-linecap:round}
 .bpm{font-size:26px;font-weight:700;font-variant-numeric:tabular-nums;display:flex;flex-direction:column;line-height:1;min-width:52px}
 .bpm small{font-size:11px;font-weight:400;color:var(--mut);margin-top:3px}
-.offset{display:flex;align-items:center;gap:10px;margin:12px 0 0;font-size:13px;color:var(--fg);flex-wrap:wrap}
-.offset .mn{width:42px;color:var(--mut)}
-.offset input{flex:1;min-width:140px;padding:0;accent-color:var(--acc)}
-.offset .ov{width:58px;text-align:right;font-variant-numeric:tabular-nums}
-.offset .hint{margin:0;min-width:80px}
+.cslider{display:flex;align-items:center;gap:10px;margin:10px 0 0;font-size:13px;color:var(--fg);flex-wrap:wrap}
+.cslider .mn{width:58px;color:var(--mut)}
+.cslider input{flex:1;min-width:140px;padding:0;accent-color:var(--acc)}
+.cslider .ov{width:64px;text-align:right;font-variant-numeric:tabular-nums}
+.cslider .hint{margin:0;min-width:80px}

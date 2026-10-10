@@ -109,6 +109,7 @@ static esp_err_t status_get(httpd_req_t *req)
     cJSON_AddBoolToObject(ao, "demo", au.demo);
     cJSON_AddBoolToObject(ao, "signal", au.signal);
     cJSON_AddNumberToObject(ao, "bpm", roundf(au.bpm * 10) / 10);
+    cJSON_AddBoolToObject(ao, "locked", au.locked);
 
     cJSON *w = cJSON_AddObjectToObject(r, "wifi");
     cJSON_AddBoolToObject(w, "sta", wifi_mgr_sta_connected());
@@ -173,6 +174,7 @@ static esp_err_t config_get(httpd_req_t *req)
     cJSON_AddNumberToObject(r, "mic_gate", g_config.mic_gate);
     cJSON_AddNumberToObject(r, "beat_sens", g_config.beat_sens);
     cJSON_AddNumberToObject(r, "beat_offset_ms", g_config.beat_offset_ms);
+    cJSON_AddNumberToObject(r, "fallback_bpm", g_config.fallback_bpm);
     return send_json(req, r);
 }
 

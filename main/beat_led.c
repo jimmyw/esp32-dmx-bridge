@@ -35,13 +35,19 @@ static void beat_led_task(void *arg)
             r = s_test[0] / MAX_LEVEL;
             g = s_test[1] / MAX_LEVEL;
             b = s_test[2] / MAX_LEVEL;
-        } else if (a.signal || a.demo) {
+        } else if (a.period_s > 0 || a.signal || a.demo) {
             float flash;
             if (a.period_s > 0) {
-                // Brightest right on the beat, gone before the next one.
+                // Brightest right on the beat, gone before the next one. Green: locked to the
+                // sound; amber: running on the demo tempo (sound without a beat).
                 float p = audio_phase_at(&a, now);
                 flash = powf(1 - p, 4);
-                g = flash;
+                if (a.locked) {
+                    g = flash;
+                } else {
+                    r = flash;
+                    g = 0.45f * flash;
+                }
             } else {
                 flash = a.last_beat_us ? expf(-(now - a.last_beat_us) / 80000.0f) : 0;
                 b = flash;

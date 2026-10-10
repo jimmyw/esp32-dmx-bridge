@@ -254,18 +254,27 @@ shifts the whole beat grid: the LED, `audio.beat`/`phase`/`time` and the ring. P
 make beats come earlier, to make up for lights that react late (DMX frame, fixture response,
 motors). It applies at once and is saved.
 
+**Demo track and tempo:** the demo track (kick, off-beat hi-hat, a pad, at the *Demo* slider's tempo,
+config `fallback_bpm`, 60–200 BPM, default 120) is the fallback for when there's no music:
+- **The microphone hears nothing for 3 s, or there is none:** the demo plays by itself, so beat
+  effects, the LED and the Sound card keep going.
+- **Sound but no beat:** talking or ambient music keeps the beat running at the same tempo.
+- **Music:** its own tempo takes over. Any sound at the microphone switches back from the demo at
+  once, and the music's tempo is held for 5 s after it stops.
+- **Demo button:** forces the demo even while music plays.
+- **Slider at the far left:** no automatic demo, and silence stays silent.
+
 **Beat LED:** the board's addressable RGB LED (WS2812, default GPIO 48; DevKitC-1 v1.1 uses 38;
 `menuconfig` → *DMX Bridge* → RGB LED GPIO, -1 = off) flashes on every beat, so the lock can be
 checked by eye. Some boards only connect the LED once their "RGB" solder jumper is bridged. On
 the serial console, `rgbled 255 255 255` lights it white for 5 s, and `rgbled pin <gpio>` tries
 another pin until the next restart. Green means
-locked to a tempo, blue means onsets only (no tempo yet), a purple tint means demo mode, and it's
-off in silence.
+locked to the tempo, amber means a beat with no tempo found in the sound, blue means onsets only
+(nothing to lock to, the demo off), and a purple tint means the demo track plays.
 
 Settings → *Microphone*: pins (all -1 = none), the noise gate (default -75 dBFS; the INMP441 hears a quiet room at about -80, music at -65 to -45) and the beat
 sensitivity (an onset must stand 1.4× its recent spread above the average). **Demo** on the Sound card, or
-`audio demo on` on the serial console, feeds a synthesized 120 BPM track through the same
-analysis, to try effects without a microphone. `GET /api/audio` returns the analysis as JSON, and
+`audio demo on` on the serial console, forces the demo track (see below). `GET /api/audio` returns the analysis as JSON, and
 `POST /api/audio {"demo":true}` switches the demo.
 
 ## Web UI

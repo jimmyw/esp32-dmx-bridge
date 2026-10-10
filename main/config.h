@@ -38,6 +38,9 @@ typedef struct {
     uint8_t  beat_sens;          // onset threshold: flux above mean + beat_sens/10 * spread
     // v3:
     int16_t  beat_offset_ms;     // shifts the beat grid: > 0 = beats come earlier (fixture delay)
+    // v4:
+    uint8_t  fallback_bpm;       // demo tempo (60-200): the demo plays when nothing is heard,
+                                 // 0 = it doesn't (the Demo button still plays it, at 120)
 } bridge_config_t;
 
 // Global, live configuration. Readers may access fields directly; writers use config_save().
@@ -52,7 +55,7 @@ const char *config_mac_suffix(void);   // "A1B2" (last 2 MAC bytes)
 // Set one field of `c` from its text form (shared by the web API and the serial CLI).
 // Keys: wifi_ssid wifi_pass hostname name protocol artnet_universe sacn_universe tx_pin
 // de_pin led_pin uart refresh_hz on_loss loss_timeout_ms mic_sck mic_ws mic_sd mic_gate beat_sens
-// beat_offset_ms. Returns NULL or an error message.
+// beat_offset_ms fallback_bpm. Returns NULL or an error message.
 // Changing wifi_ssid clears wifi_pass, so set the SSID first.
 const char *config_set_field(bridge_config_t *c, const char *key, const char *value);
 

@@ -60,6 +60,8 @@ static int   s_onset_pos, s_tempo_tick;
 static float s_cand;                     // tempo candidate that differs from the current one
 static int   s_cand_n;
 static int64_t s_last_mic_activity_us;
+static int64_t s_mic_loud_us;            // the microphone last heard something above the gate
+#define AUTO_DEMO_US 3000000             // silence before the demo track takes over
 static int s_channel = -1;               // the slot the mic talks on: 0 left, 1 right, -1 not yet
 static int32_t s_raw_min[2], s_raw_max[2];   // last block, per slot (diagnostics)
 
@@ -143,29 +145,82 @@ static float release(float prev, float v)
     return fmaxf(v, prev * RELEASE);
 }
 
-/* ---------- demo track: 120 BPM kick, off-beat hi-hat, a slow pad ---------- */
+/* ---------- demo track: kick, off-beat hi-hat, a slow pad ---------- */
 
 static uint32_t s_demo_n;   // sample counter
+static double   s_demo_pos; // beats played (the tempo can change while it runs)
+
+// The demo's tempo: the slider (config fallback_bpm), or 120 when that's off.
+static float demo_bpm(void)
+{
+    return g_config.fallback_bpm ? g_config.fallback_bpm : 120;
+}
+
+// Levels like music at the microphone (kick peaks ~-30 dBFS, hi-hat ~-45, pad ~-55), so the auto
+// gain doesn't have to settle when the input switches between the two.
 
 static void demo_fill(float *out)
 {
-    const float beat_s = 0.5f;   // 120 BPM
+    float bpm = demo_bpm(), beat_s = 60 / bpm;
     for (int i = 0; i < HOP; i++, s_demo_n++) {
         float t = (float)s_demo_n / RATE;
-        float tb = fmodf(t, beat_s);                       // time since the beat
-        float th = fmodf(t + beat_s / 2, beat_s);          // time since the off-beat
+        s_demo_pos += bpm / 60.0 / RATE;
+        float tb = (float)(s_demo_pos - floor(s_demo_pos)) * beat_s;               // since the beat
+        float th = (float)(s_demo_pos + 0.5 - floor(s_demo_pos + 0.5)) * beat_s;   // since the off-beat
         // kick: pitch sweeping 120 -> 50 Hz, ~80 ms decay
-        float kick = 0.6f * expf(-tb / 0.08f) * sinf(2 * (float)M_PI * (50 * tb + 70 * 0.03f * (1 - expf(-tb / 0.03f))));
+        float kick = 0.03f * expf(-tb / 0.08f) * sinf(2 * (float)M_PI * (50 * tb + 70 * 0.03f * (1 - expf(-tb / 0.03f))));
         float noise = (float)(esp_random() & 0xFFFF) / 32768.0f - 1;
-        float hat = 0.12f * expf(-th / 0.02f) * noise;
+        float hat = 0.006f * expf(-th / 0.02f) * noise;
         float swell = 0.5f + 0.5f * sinf(2 * (float)M_PI * t / 8);   // 8 s swell
-        float pad = 0.04f * swell * (sinf(2 * (float)M_PI * 220 * t) + sinf(2 * (float)M_PI * 277.2f * t) +
+        float pad = 0.0015f * (0.4f + 0.6f * swell) * (sinf(2 * (float)M_PI * 220 * t) + sinf(2 * (float)M_PI * 277.2f * t) +
                                      sinf(2 * (float)M_PI * 329.6f * t));
         out[i] = kick + hat + pad;
     }
 }
 
 /* ---------- tempo ---------- */
+
+static float s_music_bpm;                // tempo found in the music, 0 = none
+
+// The grid's tempo: the music's when there is one, else the fallback (config fallback_bpm, 0 =
+// none: then beats are the raw onsets). The phase carries on across a switch.
+static void set_tempo(audio_state_t *a)
+{
+    a->locked = s_music_bpm > 0;
+    a->bpm = a->locked ? s_music_bpm : g_config.fallback_bpm;
+    a->period_s = a->bpm > 0 ? 60 / a->bpm : 0;
+}
+
+static void grid_advance(audio_state_t *a, float dt, int64_t now)
+{
+    float p = a->phase + dt / a->period_s;
+    if (p >= 1) {
+        a->beats++;
+        a->last_beat_us = now;
+    }
+    a->phase = p - floorf(p);
+}
+
+// No input at all (no microphone, no demo; the fallback is off): everything at rest.
+static void idle_tick(int64_t now)
+{
+    portENTER_CRITICAL(&s_mux);
+    audio_state_t a = s_state;
+    portEXIT_CRITICAL(&s_mux);
+    float dt = a.t_us ? (now - a.t_us) / 1e6f : 0;
+    a.t_us = now;
+    a.signal = false;
+    a.demo = false;
+    s_music_bpm = 0;
+    set_tempo(&a);
+    a.level = a.bass = a.mid = a.high = 0;
+    memset(a.bands, 0, sizeof(a.bands));
+    memset(a.spectrum, 0, sizeof(a.spectrum));
+    if (a.period_s > 0) grid_advance(&a, dt, now);
+    portENTER_CRITICAL(&s_mux);
+    s_state = a;
+    portEXIT_CRITICAL(&s_mux);
+}
 
 // Autocorrelation of the onset curve over BPM_MIN..BPM_MAX, weighted by a log-normal prior
 // around 120 BPM. Returns BPM (parabolic interpolation between lags) and *conf = r(lag) / r(0).
@@ -222,7 +277,7 @@ static float comb_phase(float lag)
 
 /* ---------- analysis ---------- */
 
-static void analyse(const float *hop, int64_t now)
+static void analyse(const float *hop, int64_t now, bool demo)
 {
     memmove(s_ring, s_ring + HOP, (N - HOP) * sizeof(float));
     memcpy(s_ring + N - HOP, hop, HOP * sizeof(float));
@@ -251,6 +306,8 @@ static void analyse(const float *hop, int64_t now)
     a.t_us = now;
     a.db = db;
     a.signal = signal;
+    a.demo = demo;
+    a.demo_forced = s_demo;
 
     // Levels: auto-gained, 0 below the gate. A band's gain is capped by the loudest band (its
     // floor is a fraction of that band's peak), so faint hiss doesn't show up as full scale.
@@ -320,27 +377,28 @@ static void analyse(const float *hop, int64_t now)
         float bpm = estimate_tempo(&conf);
         bool active = s_onset_times[0] && now - s_onset_times[0] < 3000000;   // 4 onsets in 3 s
         if (conf < 0.12f || !signal || !active) {
-            if (a.bpm > 0 && now - s_tempo_seen_us > 5000000) {   // 5 s without a tempo: lost
-                a.bpm = 0;
-                a.period_s = 0;
+            if (s_music_bpm > 0 && now - s_tempo_seen_us > 5000000) {   // 5 s without a tempo: lost
+                s_music_bpm = 0;
             }
         } else {
             s_tempo_seen_us = now;
-            if (a.bpm <= 0) {
-                a.bpm = bpm;
-            } else if (fabsf(bpm - a.bpm) < a.bpm * 0.06f) {
-                a.bpm += 0.2f * (bpm - a.bpm);
+            if (s_music_bpm <= 0) {
+                s_music_bpm = bpm;
+            } else if (fabsf(bpm - s_music_bpm) < s_music_bpm * 0.06f) {
+                s_music_bpm += 0.2f * (bpm - s_music_bpm);
                 s_cand_n = 0;
             } else if (s_cand_n > 0 && fabsf(bpm - s_cand) < s_cand * 0.06f) {
                 if (++s_cand_n >= 6) {   // a new tempo held ~1 s: the music changed
-                    a.bpm = bpm;
+                    s_music_bpm = bpm;
                     s_cand_n = 0;
                 }
             } else {
                 s_cand = bpm;
                 s_cand_n = 1;
             }
-            a.period_s = 60 / a.bpm;
+        }
+        set_tempo(&a);
+        if (a.locked) {
             // Steer the phase towards where the onsets say the beats are: a third of the way,
             // at most PHASE_STEP per update, so an odd pick can't make the beat jump.
             // beat_offset_ms > 0 leads the music, to make up for the lights' own delay.
@@ -358,14 +416,9 @@ static void analyse(const float *hop, int64_t now)
         }
     }
 
-    // Beats: with a tempo, a steady grid (the phase wrapping); without one, the onsets.
+    // Beats: with a tempo (the music's or the fallback), a steady grid; with neither, the onsets.
     if (a.period_s > 0) {
-        float p = a.phase + dt / a.period_s;
-        if (p >= 1) {
-            a.beats++;
-            a.last_beat_us = now;
-        }
-        a.phase = p - floorf(p);
+        grid_advance(&a, dt, now);
     } else if (onset) {
         a.beats++;
         a.last_beat_us = now;
@@ -447,7 +500,16 @@ static void audio_task(void *arg)
                 have = true;
             }
         }
-        if (s_demo) {
+        // The demo track plays when asked to, or as the fallback: no microphone, or nothing
+        // above the noise gate for AUTO_DEMO_US. Any sound at the microphone switches back.
+        int64_t now = esp_timer_get_time();
+        if (have) {
+            float sq = 0;
+            for (int i = 0; i < HOP; i++) sq += hop[i] * hop[i];
+            if (sqrtf(sq / HOP) > powf(10, -(float)g_config.mic_gate / 20)) s_mic_loud_us = now;
+        }
+        bool demo = s_demo || (g_config.fallback_bpm && (!s_rx || now - s_mic_loud_us > AUTO_DEMO_US));
+        if (demo) {
             if (!s_rx) {   // pace it ourselves
                 next += HOP_US;
                 int64_t wait = next - esp_timer_get_time();
@@ -457,11 +519,12 @@ static void audio_task(void *arg)
             demo_fill(hop);
             have = true;
         } else if (!s_rx) {
-            vTaskDelay(pdMS_TO_TICKS(200));
+            vTaskDelay(pdMS_TO_TICKS(20));
             next = esp_timer_get_time();
+            idle_tick(next);
         }
         if (have) {
-            analyse(hop, esp_timer_get_time());
+            analyse(hop, esp_timer_get_time(), demo);
         }
     }
 }
@@ -484,7 +547,7 @@ void audio_set_demo(bool on)
 {
     s_demo = on;
     portENTER_CRITICAL(&s_mux);
-    s_state.demo = on;
+    s_state.demo_forced = on;
     portEXIT_CRITICAL(&s_mux);
     ESP_LOGI(TAG, "demo %s", on ? "on" : "off");
 }
@@ -504,6 +567,7 @@ cJSON *audio_json(void)
     cJSON_AddNumberToObject(raw, "right_min", s_raw_min[1]);
     cJSON_AddNumberToObject(raw, "right_max", s_raw_max[1]);
     cJSON_AddBoolToObject(r, "demo", a.demo);
+    cJSON_AddBoolToObject(r, "demo_forced", a.demo_forced);
     cJSON_AddBoolToObject(r, "signal", a.signal);
     cJSON_AddNumberToObject(r, "db", roundf(a.db * 10) / 10);
     cJSON_AddNumberToObject(r, "level", a.level);
@@ -512,6 +576,7 @@ cJSON *audio_json(void)
     cJSON_AddNumberToObject(r, "high", a.high);
     cJSON_AddNumberToObject(r, "beats", a.beats);
     cJSON_AddNumberToObject(r, "bpm", roundf(a.bpm * 10) / 10);
+    cJSON_AddBoolToObject(r, "locked", a.locked);
     cJSON_AddNumberToObject(r, "phase", audio_phase_at(&a, now));
     cJSON *b = cJSON_AddArrayToObject(r, "bands");
     for (int i = 0; i < AUDIO_BANDS; i++) cJSON_AddItemToArray(b, cJSON_CreateNumber(roundf(a.bands[i] * 1000) / 1000));

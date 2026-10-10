@@ -628,13 +628,13 @@ static const duk_function_list_entry s_natives[] = {
 /* ---------- audio ---------- */
 
 // Refresh the global `audio` object (created on start): on, signal, level, bass, mid, high,
-// bands[16], beat (a beat since the previous frame), beats, bpm, phase, time.
+// bands[16], beat (a beat since the previous frame), beats, bpm, locked, phase, time.
 static void push_audio(int64_t now)
 {
     audio_state_t a;
     audio_get(&a);
     // Beat clock: follows the phase while there's a tempo (never backwards: the phase lock may
-    // nudge it back a little), else runs on at 120 BPM.
+    // nudge it back a little), else (no grid at all: fallback off) runs on at 120 BPM.
     float phase = audio_phase_at(&a, now);
     if (a.period_s > 0) {
         float d = phase - s_last_phase;
@@ -662,6 +662,7 @@ static void push_audio(int64_t now)
     PUT_BOOL("beat", a.beats != s_seen_beats);
     PUT_NUM("beats", a.beats);
     PUT_NUM("bpm", a.bpm);
+    PUT_BOOL("locked", a.locked);
     PUT_NUM("phase", phase);
     PUT_NUM("time", s_beat_time);
 #undef PUT_NUM
