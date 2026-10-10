@@ -1,5 +1,7 @@
 #include "artnet.h"
 #include "assets.h"
+#include "audio.h"
+#include "beat_led.h"
 #include "cli.h"
 #include "config.h"
 #include "dmx_buffer.h"
@@ -101,6 +103,8 @@ void app_main(void)
     ESP_ERROR_CHECK(artnet_start());
     ESP_ERROR_CHECK(sacn_start());
     assets_init();   // web pages partition; built-in pages are used without it
+    audio_start();   // microphone analysis (also without one: demo mode)
+    beat_led_start();   // board RGB LED flashes on the beat
     script_init();   // effect scripts; restarts the one that was running
     ESP_ERROR_CHECK(web_start());
     xTaskCreate(ui_task, "ui", 3072, NULL, 3, NULL);

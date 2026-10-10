@@ -3,9 +3,11 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include "audio.h"
 #include "cJSON.h"
 #include "dmx_buffer.h"
 #include "esp_log.h"
+#include "esp_timer.h"
 #include "names.h"
 #include "scenes.h"
 #include "freertos/FreeRTOS.h"
@@ -18,8 +20,12 @@ static const char *TAG = "console";
  * WebSocket protocol (binary):
  *   client -> server: repeated 3-byte records [ch_hi, ch_lo, value]; ch 0..511, 0xFFFF = master.
  *                     text "clear" zeroes all console faders.
+ *                     text "audio" subscribes to audio frames for ~5 s (clients repeat it).
  *   server -> client: every PUSH_MS: [0x01][master][manual x512][output x512]
  *                     text "names" / "scenes" / "scripts" when those changed (clients re-fetch).
+ *                     to audio subscribers, every PUSH_MS: [0x02][flags: 1 mic, 2 demo, 4 signal]
+ *                     [level][bass][mid][high] (0-255) [beats u16 LE][bpm x10 u16 LE][phase 0-255]
+ *                     [dB + 100][bands x16][spectrum x32]
  */
 #define PUSH_MS     66
 #define MASTER_CH   0xFFFF
@@ -32,6 +38,8 @@ static const char *TAG = "console";
 static httpd_handle_t s_server;
 static volatile int s_idle_left;
 static struct { int fd; int stalled; } s_stall[MAX_CLIENTS];
+#define AUDIO_SUB_US 5000000
+static struct { int fd; int64_t until_us; } s_audio_subs[MAX_CLIENTS];   // fd recycled: expires
 
 // A sleeping phone stops ACKing; a blocking send would then stall the whole web server.
 static bool writable(int fd)
@@ -91,11 +99,57 @@ static esp_err_t ws_handler(httpd_req_t *req)
     } else if (f.type == HTTPD_WS_TYPE_TEXT && f.len == 5 && memcmp(buf, "clear", 5) == 0) {
         scenes_stop_fade();
         dmx_buffer_clear_manual();
+    } else if (f.type == HTTPD_WS_TYPE_TEXT && f.len == 5 && memcmp(buf, "audio", 5) == 0) {
+        int fd = httpd_req_to_sockfd(req);
+        int64_t now = esp_timer_get_time();
+        int slot = -1;
+        for (int i = 0; i < MAX_CLIENTS; i++) {
+            if (s_audio_subs[i].fd == fd && s_audio_subs[i].until_us > now) { slot = i; break; }
+            if (slot < 0 && s_audio_subs[i].until_us <= now) slot = i;
+        }
+        if (slot >= 0) {
+            s_audio_subs[slot].fd = fd;
+            s_audio_subs[slot].until_us = now + AUDIO_SUB_US;
+        }
     }
     return ESP_OK;
 }
 
 // Runs in the httpd task (queued), so socket access is serialized with request handling.
+static bool audio_subscribed(int fd, int64_t now)
+{
+    for (int i = 0; i < MAX_CLIENTS; i++) {
+        if (s_audio_subs[i].fd == fd && s_audio_subs[i].until_us > now) return true;
+    }
+    return false;
+}
+
+static size_t audio_frame(uint8_t *p)
+{
+    audio_state_t a;
+    audio_get(&a);
+    int64_t now = esp_timer_get_time();
+    uint8_t *q = p;
+    *q++ = 0x02;
+    *q++ = (a.mic ? 1 : 0) | (a.demo ? 2 : 0) | (a.signal ? 4 : 0);
+    *q++ = (uint8_t)(a.level * 255 + 0.5f);
+    *q++ = (uint8_t)(a.bass * 255 + 0.5f);
+    *q++ = (uint8_t)(a.mid * 255 + 0.5f);
+    *q++ = (uint8_t)(a.high * 255 + 0.5f);
+    *q++ = a.beats & 0xFF;
+    *q++ = (a.beats >> 8) & 0xFF;
+    uint16_t bpm = (uint16_t)(a.bpm * 10 + 0.5f);
+    *q++ = bpm & 0xFF;
+    *q++ = bpm >> 8;
+    *q++ = (uint8_t)(audio_phase_at(&a, now) * 255);
+    float db = a.db + 100;
+    *q++ = db < 0 ? 0 : db > 255 ? 255 : (uint8_t)db;
+    for (int i = 0; i < AUDIO_BANDS; i++) *q++ = (uint8_t)(a.bands[i] * 255 + 0.5f);
+    memcpy(q, a.spectrum, AUDIO_SPECTRUM);
+    q += AUDIO_SPECTRUM;
+    return q - p;
+}
+
 static void push_work(void *arg)
 {
     static uint8_t frame[2 + 2 * DMX_SLOTS];
@@ -108,6 +162,9 @@ static void push_work(void *arg)
     dmx_buffer_get_manual(&frame[2], &frame[1]);
     dmx_buffer_peek(&frame[2 + DMX_SLOTS], DMX_SLOTS);
     httpd_ws_frame_t f = { .type = HTTPD_WS_TYPE_BINARY, .payload = frame, .len = sizeof(frame), .final = true };
+    static uint8_t abuf[64];
+    size_t alen = audio_frame(abuf);
+    int64_t now = esp_timer_get_time();
 
     bool any = false;
     for (size_t i = 0; i < fds_n; i++) {
@@ -117,6 +174,10 @@ static void push_work(void *arg)
             if (writable(fds[i])) {
                 if (stalled) *stalled = 0;
                 httpd_ws_send_frame_async(s_server, fds[i], &f);
+                if (audio_subscribed(fds[i], now) && writable(fds[i])) {
+                    httpd_ws_frame_t af = { .type = HTTPD_WS_TYPE_BINARY, .payload = abuf, .len = alen, .final = true };
+                    httpd_ws_send_frame_async(s_server, fds[i], &af);
+                }
             } else if (stalled && ++*stalled >= STALL_LIMIT) {
                 ESP_LOGW(TAG, "closing unresponsive console client (fd %d)", fds[i]);
                 *stalled = 0;

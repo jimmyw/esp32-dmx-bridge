@@ -30,6 +30,14 @@ typedef struct {
     uint8_t  refresh_hz;         // DMX frames per second
     uint8_t  on_loss;            // dmx_loss_t
     uint16_t loss_timeout_ms;
+    // v2 (appended, so a v1 blob loads as a prefix):
+    int8_t   mic_sck;            // INMP441 I2S microphone pins, -1 = no microphone
+    int8_t   mic_ws;
+    int8_t   mic_sd;
+    uint8_t  mic_gate;           // noise gate: input below -mic_gate dBFS counts as silence
+    uint8_t  beat_sens;          // onset threshold: flux above mean + beat_sens/10 * spread
+    // v3:
+    int16_t  beat_offset_ms;     // shifts the beat grid: > 0 = beats come earlier (fixture delay)
 } bridge_config_t;
 
 // Global, live configuration. Readers may access fields directly; writers use config_save().
@@ -43,7 +51,8 @@ const char *config_mac_suffix(void);   // "A1B2" (last 2 MAC bytes)
 
 // Set one field of `c` from its text form (shared by the web API and the serial CLI).
 // Keys: wifi_ssid wifi_pass hostname name protocol artnet_universe sacn_universe tx_pin
-// de_pin led_pin uart refresh_hz on_loss loss_timeout_ms. Returns NULL or an error message.
+// de_pin led_pin uart refresh_hz on_loss loss_timeout_ms mic_sck mic_ws mic_sd mic_gate beat_sens
+// beat_offset_ms. Returns NULL or an error message.
 // Changing wifi_ssid clears wifi_pass, so set the SSID first.
 const char *config_set_field(bridge_config_t *c, const char *key, const char *value);
 

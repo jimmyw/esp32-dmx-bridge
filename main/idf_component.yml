@@ -2,3 +2,4 @@ dependencies:
   idf: ">=5.3"
   espressif/mdns: "^1.8"
   espressif/cjson: "^1.7"
+  espressif/led_strip: "^3.0"

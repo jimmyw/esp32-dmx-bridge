@@ -1,5 +1,6 @@
 #include "config.h"
 
+#include <stddef.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -14,12 +15,24 @@
 static const char *TAG = "config";
 static const char *NVS_NS = "bridge";
 static const char *NVS_KEY = "cfg";
-#define CONFIG_VERSION 1
+#define CONFIG_VERSION 3
+// Each version appended fields: v1 ended at loss_timeout_ms, v2 added the microphone, v3 the beat
+// offset. An older blob is a prefix (plus padding) of the current struct.
+static const size_t s_version_size[CONFIG_VERSION + 1] = {
+    0, offsetof(bridge_config_t, mic_sck), offsetof(bridge_config_t, beat_offset_ms), sizeof(bridge_config_t),
+};
 
 typedef struct {
     uint32_t        version;
     bridge_config_t cfg;
 } stored_config_t;
+
+static bool blob_is_version(size_t len, uint32_t version)
+{
+    if (version < 1 || version > CONFIG_VERSION) return false;
+    size_t want = offsetof(stored_config_t, cfg) + s_version_size[version];
+    return len >= want && len <= ((want + 3) & ~(size_t)3);   // allow the struct's tail padding
+}
 
 bridge_config_t g_config;
 static char s_mac_suffix[5];
@@ -60,6 +73,11 @@ static void set_defaults(void)
     g_config.refresh_hz       = 40;
     g_config.on_loss          = LOSS_HOLD;
     g_config.loss_timeout_ms  = 3000;
+    g_config.mic_sck          = CONFIG_DMX_MIC_SCK_PIN;
+    g_config.mic_ws           = CONFIG_DMX_MIC_WS_PIN;
+    g_config.mic_sd           = CONFIG_DMX_MIC_SD_PIN;
+    g_config.mic_gate         = 75;
+    g_config.beat_sens        = 14;
 }
 
 static void sanitize(void)
@@ -73,6 +91,12 @@ static void sanitize(void)
     g_config.artnet_port_addr &= 0x7FFF;
     if (g_config.sacn_universe < 1 || g_config.sacn_universe > 63999) g_config.sacn_universe = 1;
     if (g_config.loss_timeout_ms < 500) g_config.loss_timeout_ms = 500;
+    if (!config_pin_valid(g_config.mic_sck, true)) g_config.mic_sck = -1;
+    if (!config_pin_valid(g_config.mic_ws, true))  g_config.mic_ws = -1;
+    if (!config_pin_valid(g_config.mic_sd, true))  g_config.mic_sd = -1;
+    if (g_config.mic_gate < 20 || g_config.mic_gate > 100) g_config.mic_gate = 75;
+    if (g_config.beat_sens < 10 || g_config.beat_sens > 40) g_config.beat_sens = 14;
+    if (g_config.beat_offset_ms < -300 || g_config.beat_offset_ms > 300) g_config.beat_offset_ms = 0;
     if (g_config.hostname[0] == '\0') {
         snprintf(g_config.hostname, sizeof(g_config.hostname), "%s-%s",
                  CONFIG_DMX_HOSTNAME_PREFIX, s_mac_suffix);
@@ -93,11 +117,16 @@ esp_err_t config_init(void)
     nvs_handle_t h;
     esp_err_t err = nvs_open(NVS_NS, NVS_READONLY, &h);
     if (err == ESP_OK) {
-        stored_config_t stored;
+        // Prefilled with defaults: an older (shorter) version only overwrites its own fields.
+        stored_config_t stored = { .cfg = g_config };
         size_t len = sizeof(stored);
         err = nvs_get_blob(h, NVS_KEY, &stored, &len);
         nvs_close(h);
-        if (err == ESP_OK && len == sizeof(stored) && stored.version == CONFIG_VERSION) {
+        if (err == ESP_OK && blob_is_version(len, stored.version)) {
+            if (stored.version != CONFIG_VERSION) {
+                ESP_LOGI(TAG, "config v%lu -> v%d (new settings get defaults)", (unsigned long)stored.version,
+                         CONFIG_VERSION);
+            }
             g_config = stored.cfg;
             g_config.wifi_ssid[sizeof(g_config.wifi_ssid) - 1] = '\0';
             g_config.wifi_pass[sizeof(g_config.wifi_pass) - 1] = '\0';
@@ -148,7 +177,7 @@ esp_err_t config_factory_reset(void)
 const char *const CONFIG_KEYS[] = {
     "wifi_ssid", "wifi_pass", "hostname", "name", "protocol", "artnet_universe",
     "sacn_universe", "tx_pin", "de_pin", "led_pin", "uart", "refresh_hz", "on_loss",
-    "loss_timeout_ms", NULL,
+    "loss_timeout_ms", "mic_sck", "mic_ws", "mic_sd", "mic_gate", "beat_sens", "beat_offset_ms", NULL,
 };
 
 static bool parse_int(const char *s, int lo, int hi, int *out)
@@ -227,6 +256,19 @@ const char *config_set_field(bridge_config_t *c, const char *key, const char *va
         if (strcmp(value, "hold") == 0 || strcmp(value, "0") == 0) c->on_loss = LOSS_HOLD;
         else if (strcmp(value, "blackout") == 0 || strcmp(value, "1") == 0) c->on_loss = LOSS_BLACKOUT;
         else return "on_loss: hold or blackout";
+    } else if (strcmp(key, "mic_sck") == 0 || strcmp(key, "mic_ws") == 0 || strcmp(key, "mic_sd") == 0) {
+        if (!parse_int(value, -1, 48, &v) || !config_pin_valid(v, true)) return "invalid microphone pin (-1 = none)";
+        int8_t *pin = strcmp(key, "mic_sck") == 0 ? &c->mic_sck : strcmp(key, "mic_ws") == 0 ? &c->mic_ws : &c->mic_sd;
+        *pin = v;
+    } else if (strcmp(key, "mic_gate") == 0) {
+        if (!parse_int(value, 20, 100, &v)) return "noise gate must be 20-100 (dB below full scale)";
+        c->mic_gate = v;
+    } else if (strcmp(key, "beat_sens") == 0) {
+        if (!parse_int(value, 10, 40, &v)) return "beat sensitivity must be 10-40";
+        c->beat_sens = v;
+    } else if (strcmp(key, "beat_offset_ms") == 0) {
+        if (!parse_int(value, -300, 300, &v)) return "beat offset must be -300..300 ms";
+        c->beat_offset_ms = v;
     } else if (strcmp(key, "loss_timeout_ms") == 0) {
         if (!parse_int(value, 500, 60000, &v)) return "loss timeout must be 500-60000 ms";
         c->loss_timeout_ms = v;
@@ -238,15 +280,27 @@ const char *config_set_field(bridge_config_t *c, const char *key, const char *va
 
 const char *config_commit(const bridge_config_t *c, bool *reboot)
 {
-    if (c->tx_pin == c->de_pin ||
-        (c->led_pin >= 0 && (c->led_pin == c->tx_pin || c->led_pin == c->de_pin))) {
-        return "pins must be different";
+    // Every assigned pin (DE/LED/mic may be -1 = none) must be distinct.
+    const int pins[] = { c->tx_pin, c->de_pin, c->led_pin, c->mic_sck, c->mic_ws, c->mic_sd };
+    const int n = sizeof(pins) / sizeof(pins[0]);
+    for (int i = 0; i < n; i++) {
+        for (int j = i + 1; j < n; j++) {
+            if (pins[i] >= 0 && pins[i] == pins[j]) {
+                return "pins must be different";
+            }
+        }
+    }
+    int mics = (c->mic_sck >= 0) + (c->mic_ws >= 0) + (c->mic_sd >= 0);
+    if (mics != 0 && mics != 3) {
+        return "microphone needs all three pins (or all -1)";
     }
     bool need_reboot = strcmp(c->wifi_ssid, g_config.wifi_ssid) != 0 ||
                        strcmp(c->wifi_pass, g_config.wifi_pass) != 0 ||
                        strcmp(c->hostname, g_config.hostname) != 0 ||
                        c->tx_pin != g_config.tx_pin || c->de_pin != g_config.de_pin ||
-                       c->led_pin != g_config.led_pin || c->uart_num != g_config.uart_num;
+                       c->led_pin != g_config.led_pin || c->uart_num != g_config.uart_num ||
+                       c->mic_sck != g_config.mic_sck || c->mic_ws != g_config.mic_ws ||
+                       c->mic_sd != g_config.mic_sd;
     bool universe_changed = c->artnet_port_addr != g_config.artnet_port_addr ||
                             c->sacn_universe != g_config.sacn_universe ||
                             c->protocol != g_config.protocol;

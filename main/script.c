@@ -7,6 +7,7 @@
 #include <string.h>
 #include <sys/stat.h>
 #include <unistd.h>
+#include "audio.h"
 #include "config.h"
 #include "dmx_buffer.h"
 #include "duktape.h"
@@ -48,9 +49,10 @@ EXAMPLE(color_chase_js)
 EXAMPLE(figure_eight_js)
 EXAMPLE(setup_js)
 EXAMPLE(cycle_js)
+EXAMPLE(beat_pulse_js)
 // since: the seed version that added the file. A bridge seeded before gets just the newer files,
 // once, so a file the user deleted or changed stays that way.
-#define SEED_VERSION 3
+#define SEED_VERSION 4
 #define EXAMPLE_ENTRY(n, sym, v) { n, sym##_start, sym##_end, v }
 static const struct { const char *name; const char *start, *end; uint8_t since; } s_examples[] = {
     EXAMPLE_ENTRY("fan-circle", fan_circle_js, 1),
@@ -58,6 +60,7 @@ static const struct { const char *name; const char *start, *end; uint8_t since; 
     EXAMPLE_ENTRY("figure-eight", figure_eight_js, 1),
     EXAMPLE_ENTRY("setup", setup_js, 2),
     EXAMPLE_ENTRY("cycle", cycle_js, 3),
+    EXAMPLE_ENTRY("beat-pulse", beat_pulse_js, 4),
 };
 
 typedef struct {
@@ -92,6 +95,10 @@ static uint8_t       s_values[DMX_SLOTS], s_input[DMX_SLOTS], s_fader[DMX_SLOTS]
 static bool          s_owned[DMX_SLOTS];
 static char          s_included[MAX_INCLUDES][SCRIPT_NAME_MAX + 1];   // include()d by the running script
 static int           s_nincluded;
+static uint32_t      s_seen_beats;           // audio beat count at the previous frame
+static double        s_beat_time;            // audio.time: beats elapsed, smooth
+static float         s_last_phase;
+static int64_t       s_last_audio_us;
 static int64_t       s_start_us, s_last_us;
 static volatile int64_t s_deadline_us;      // exec timeout, 0 = none
 static const char   *s_deadline_what;       // "frame()" or "top-level code"
@@ -618,6 +625,58 @@ static const duk_function_list_entry s_natives[] = {
     { NULL, NULL, 0 },
 };
 
+/* ---------- audio ---------- */
+
+// Refresh the global `audio` object (created on start): on, signal, level, bass, mid, high,
+// bands[16], beat (a beat since the previous frame), beats, bpm, phase, time.
+static void push_audio(int64_t now)
+{
+    audio_state_t a;
+    audio_get(&a);
+    // Beat clock: follows the phase while there's a tempo (never backwards: the phase lock may
+    // nudge it back a little), else runs on at 120 BPM.
+    float phase = audio_phase_at(&a, now);
+    if (a.period_s > 0) {
+        float d = phase - s_last_phase;
+        if (d < -0.5f) d += 1;
+        if (d > 0.5f) d -= 1;
+        if (d > 0) s_beat_time += d;
+    } else if (s_last_audio_us) {
+        s_beat_time += (now - s_last_audio_us) / 1e6 * 2;
+    }
+    s_last_phase = phase;
+    s_last_audio_us = now;
+    duk_get_global_string(s_ctx, "audio");
+    if (!duk_is_object(s_ctx, -1)) {   // the script replaced it
+        duk_pop(s_ctx);
+        return;
+    }
+#define PUT_NUM(key, v)  (duk_push_number(s_ctx, (v)), duk_put_prop_string(s_ctx, -2, key))
+#define PUT_BOOL(key, v) (duk_push_boolean(s_ctx, (v)), duk_put_prop_string(s_ctx, -2, key))
+    PUT_BOOL("on", a.mic || a.demo);
+    PUT_BOOL("signal", a.signal);
+    PUT_NUM("level", a.level);
+    PUT_NUM("bass", a.bass);
+    PUT_NUM("mid", a.mid);
+    PUT_NUM("high", a.high);
+    PUT_BOOL("beat", a.beats != s_seen_beats);
+    PUT_NUM("beats", a.beats);
+    PUT_NUM("bpm", a.bpm);
+    PUT_NUM("phase", phase);
+    PUT_NUM("time", s_beat_time);
+#undef PUT_NUM
+#undef PUT_BOOL
+    s_seen_beats = a.beats;
+    duk_get_prop_string(s_ctx, -1, "bands");
+    if (duk_is_array(s_ctx, -1)) {
+        for (int i = 0; i < AUDIO_BANDS; i++) {
+            duk_push_number(s_ctx, a.bands[i]);
+            duk_put_prop_index(s_ctx, -2, i);
+        }
+    }
+    duk_pop_2(s_ctx);
+}
+
 /* ---------- engine ---------- */
 
 // Error at the top of the stack -> "line 12: TypeError: ..." in s_error and the log.
@@ -746,6 +805,17 @@ static void engine_start(const char *name, bool guarded)
     duk_push_global_object(s_ctx);
     duk_put_function_list(s_ctx, -1, s_natives);
     duk_pop(s_ctx);
+    duk_push_object(s_ctx);
+    duk_push_array(s_ctx);
+    duk_put_prop_string(s_ctx, -2, "bands");
+    duk_put_global_string(s_ctx, "audio");
+    audio_state_t as;
+    audio_get(&as);
+    s_seen_beats = as.beats;   // no stale beat on the first frame
+    s_beat_time = 0;
+    s_last_audio_us = 0;
+    s_last_phase = audio_phase_at(&as, esp_timer_get_time());
+    push_audio(esp_timer_get_time());
 
     s_deadline_what = "top-level code";
     s_timed_out = false;
@@ -793,6 +863,7 @@ static void engine_frame(void)
     uint8_t master;
     dmx_buffer_get_manual(s_fader, &master);
 
+    push_audio(now);
     duk_get_global_string(s_ctx, "frame");
     duk_push_number(s_ctx, (now - s_start_us) / 1e6);
     duk_push_number(s_ctx, (now - s_last_us) / 1e6);

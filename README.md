@@ -223,6 +223,51 @@ effects load with `include('setup')`. `scripts/cycle.js` plays a list of effects
 a set time (and can play other cycles). Examples and the full API are in
 [`scripts/`](scripts/README.md).
 
+## Sound (INMP441 microphone)
+
+An INMP441 I2S MEMS microphone lets effects play to the music. Wiring, with the default pins (change
+them in Settings):
+
+| INMP441 | ESP32-S3 |
+|---|---|
+| VDD | 3V3 |
+| GND | GND |
+| L/R | GND (left channel) |
+| SCK | GPIO 4 |
+| WS | GPIO 5 |
+| SD | GPIO 6 |
+
+The bridge samples it at 22.05 kHz and runs a 1024-point FFT about 43 times a second on core 1
+(`main/audio.c`). From that come the level, bass/mid/high and 16 bands, all auto-gained against
+their recent peak and gated below the noise floor. Beats are found in three steps:
+1. **Onsets:** jumps in the spectrum (log spectral flux, mostly the low end).
+2. **Tempo:** the autocorrelation of the last 6 s of onsets over 70–180 BPM, leaning towards
+   120. A stray hit barely moves it.
+3. **Beat grid:** a steady grid whose phase is pulled towards where the onsets line up. Effects
+   get an even beat, not every bass note.
+ Scripts read all of it from the `audio` object
+([scripts/README.md](scripts/README.md#music-the-audio-object)), and the start page's **Sound**
+card shows it live: spectrum, meters, beat flash, phase ring and BPM.
+
+**Beat offset:** the *Offset* slider on the Sound card (-300…+300 ms, config `beat_offset_ms`)
+shifts the whole beat grid: the LED, `audio.beat`/`phase`/`time` and the ring. Positive values
+make beats come earlier, to make up for lights that react late (DMX frame, fixture response,
+motors). It applies at once and is saved.
+
+**Beat LED:** the board's addressable RGB LED (WS2812, default GPIO 48; DevKitC-1 v1.1 uses 38;
+`menuconfig` → *DMX Bridge* → RGB LED GPIO, -1 = off) flashes on every beat, so the lock can be
+checked by eye. Some boards only connect the LED once their "RGB" solder jumper is bridged. On
+the serial console, `rgbled 255 255 255` lights it white for 5 s, and `rgbled pin <gpio>` tries
+another pin until the next restart. Green means
+locked to a tempo, blue means onsets only (no tempo yet), a purple tint means demo mode, and it's
+off in silence.
+
+Settings → *Microphone*: pins (all -1 = none), the noise gate (default -75 dBFS; the INMP441 hears a quiet room at about -80, music at -65 to -45) and the beat
+sensitivity (an onset must stand 1.4× its recent spread above the average). **Demo** on the Sound card, or
+`audio demo on` on the serial console, feeds a synthesized 120 BPM track through the same
+analysis, to try effects without a microphone. `GET /api/audio` returns the analysis as JSON, and
+`POST /api/audio {"demo":true}` switches the demo.
+
 ## Web UI
 
 The start page (`/`) is a button board. **Effects** has one big button per effect script: tap one
@@ -289,6 +334,7 @@ The USB-Serial/JTAG port carries the log and a command line (`dmx>` prompt):
 | `hide <ch>` / `unhide <ch\|all>` | hide / show channels on the web console |
 | `scene list` / `save <n> [name]` / `recall <n> [fade s]` / `rename <n> <name>` / `delete <n>` | console scenes |
 | `script [list]` / `run <name>` / `stop` / `log` / `param <name> <value>` | effect scripts |
+| `audio` / `audio demo on\|off` | microphone analysis (level, bands, beats, BPM) / demo track |
 | `dmx [n]` | show the first n output channels (default 32) |
 | `log <level> [tag]` | change log verbosity, e.g. `log warn` to quiet the console |
 | `reboot` / `factory_reset yes` | restart / erase all settings |

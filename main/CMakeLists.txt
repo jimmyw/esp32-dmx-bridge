@@ -1,13 +1,13 @@
 idf_component_register(
     SRCS "main.c" "assets.c" "config.c" "dmx_out.c" "dmx_buffer.c" "artnet.c" "sacn.c"
          "wifi_mgr.c" "mdns_svc.c" "captive_dns.c" "web.c" "cli.c" "console.c" "names.c" "scenes.c"
-         "script.c" "script_web.c"
+         "script.c" "script_web.c" "audio.c" "beat_led.c"
     INCLUDE_DIRS "."
     PRIV_REQUIRES nvs_flash esp_wifi esp_netif esp_event esp_http_server
-                  esp_driver_uart esp_driver_gpio esp_app_format app_update console lwip esp_timer esp_partition spiffs duktape
+                  esp_driver_uart esp_driver_gpio esp_app_format app_update console lwip esp_timer esp_partition spiffs duktape esp_driver_i2s
     EMBED_TXTFILES "script_prelude.js" "../scripts/fan-circle.js" "../scripts/color-chase.js"
                    "../scripts/figure-eight.js" "../scripts/setup.js"
-                   "../scripts/cycle.js"
+                   "../scripts/cycle.js" "../scripts/beat-pulse.js"
 )
 
 # Web UI: webpack bundles web/src into one self-contained, gzipped HTML file per page

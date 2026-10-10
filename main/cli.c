@@ -4,6 +4,8 @@
 #include <stdlib.h>
 #include <string.h>
 #include "argtable3/argtable3.h"
+#include "audio.h"
+#include "beat_led.h"
 #include "config.h"
 #include "console.h"
 #include "dmx_buffer.h"
@@ -99,6 +101,49 @@ static int cmd_config(int argc, char **argv)
     printf("refresh_hz      = %u\n", c->refresh_hz);
     printf("on_loss         = %s\n", c->on_loss == LOSS_BLACKOUT ? "blackout" : "hold");
     printf("loss_timeout_ms = %u\n", c->loss_timeout_ms);
+    printf("mic_sck/ws/sd   = %d / %d / %d\n", c->mic_sck, c->mic_ws, c->mic_sd);
+    printf("mic_gate        = %u  (-%u dBFS)\n", c->mic_gate, c->mic_gate);
+    printf("beat_sens       = %u  (x%.1f)\n", c->beat_sens, c->beat_sens / 10.0);
+    printf("beat_offset_ms  = %d  (beats %s)\n", c->beat_offset_ms, c->beat_offset_ms >= 0 ? "earlier" : "later");
+    return 0;
+}
+
+/* ---- rgbled [r g b [ms]] | pin <gpio> ---- */
+
+static int cmd_rgbled(int argc, char **argv)
+{
+    esp_err_t err;
+    if (argc == 3 && strcmp(argv[1], "pin") == 0) {
+        err = beat_led_set_pin(atoi(argv[2]));
+    } else if (argc == 4 || argc == 5) {
+        err = beat_led_test(atoi(argv[1]), atoi(argv[2]), atoi(argv[3]), argc == 5 ? atoi(argv[4]) : 5000);
+    } else if (argc == 1) {
+        printf("beat LED on GPIO %d\n", beat_led_pin());
+        return 0;
+    } else {
+        printf("Usage: rgbled [<r> <g> <b> [ms]] | pin <gpio>\n");
+        return 1;
+    }
+    printf("%s\n", err == ESP_OK ? "OK" : esp_err_to_name(err));
+    return err == ESP_OK ? 0 : 1;
+}
+
+/* ---- audio [demo on|off] ---- */
+
+static int cmd_audio(int argc, char **argv)
+{
+    if (argc == 3 && strcmp(argv[1], "demo") == 0) {
+        audio_set_demo(strcmp(argv[2], "on") == 0);
+    } else if (argc != 1) {
+        printf("Usage: audio [demo on|off]\n");
+        return 1;
+    }
+    audio_state_t a;
+    audio_get(&a);
+    printf("mic %s%s, input %.1f dBFS%s\n", a.mic ? "on" : "not configured", a.demo ? " (demo)" : "",
+           a.db, a.signal ? "" : " (below gate)");
+    printf("level %.2f  bass %.2f  mid %.2f  high %.2f\n", a.level, a.bass, a.mid, a.high);
+    printf("beats %lu  bpm %.1f\n", (unsigned long)a.beats, a.bpm);
     return 0;
 }
 
@@ -498,6 +543,9 @@ esp_err_t cli_start(void)
         { .command = "scene", .help = "Console scenes: scene list|save|recall|rename|delete", .func = cmd_scene },
         { .command = "script", .help = "Effect scripts: script [list] | run <name> | stop | log | param <name> <v>",
           .func = cmd_script },
+        { .command = "rgbled", .help = "Beat LED test: rgbled <r> <g> <b> [ms] (default 5 s), rgbled pin <gpio>",
+          .func = cmd_rgbled },
+        { .command = "audio", .help = "Microphone analysis: audio [demo on|off]", .func = cmd_audio },
         { .command = "log", .help = "Set log level: log <none|error|warn|info|debug> [tag]", .func = cmd_log },
         { .command = "reboot", .help = "Restart the bridge", .func = cmd_reboot },
         { .command = "factory_reset", .help = "Erase all settings: factory_reset yes", .func = cmd_factory_reset },

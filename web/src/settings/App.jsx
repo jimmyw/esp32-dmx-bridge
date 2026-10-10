@@ -5,9 +5,11 @@ import { Firmware } from './Firmware';
 import { Status, useStatus } from '../common/Status';
 
 const FIELDS = ['wifi_ssid', 'protocol', 'artnet_universe', 'sacn_universe', 'on_loss', 'loss_timeout_ms',
-                'refresh_hz', 'name', 'hostname', 'tx_pin', 'de_pin', 'uart', 'led_pin'];
+                'refresh_hz', 'name', 'hostname', 'tx_pin', 'de_pin', 'uart', 'led_pin',
+                'mic_sck', 'mic_ws', 'mic_sd', 'mic_gate', 'beat_sens'];
 const NUMERIC = new Set(['protocol', 'artnet_universe', 'sacn_universe', 'on_loss', 'loss_timeout_ms',
-                         'refresh_hz', 'tx_pin', 'de_pin', 'uart', 'led_pin']);
+                         'refresh_hz', 'tx_pin', 'de_pin', 'uart', 'led_pin',
+                         'mic_sck', 'mic_ws', 'mic_sd', 'mic_gate', 'beat_sens']);
 
 function artHint(v) {
   v = +v || 0;
@@ -163,6 +165,31 @@ export function App() {
               <div class="hint">-1 = none</div></div>
           </div>
           <div class="hint">Wi-Fi, hostname and pin changes restart the bridge.</div>
+        </section>
+
+        <section class="card">
+          <h2>Microphone (INMP441)</h2>
+          <div class="row">
+            <div><label for="mic_sck">SCK GPIO</label>
+              <input {...bind('mic_sck')} type="number" min="-1" max="48" /></div>
+            <div><label for="mic_ws">WS GPIO</label>
+              <input {...bind('mic_ws')} type="number" min="-1" max="48" /></div>
+            <div><label for="mic_sd">SD GPIO</label>
+              <input {...bind('mic_sd')} type="number" min="-1" max="48" />
+              <div class="hint">-1 on all three = no microphone</div></div>
+          </div>
+          <div class="row">
+            <div><label for="mic_gate">Noise gate (dB below full scale)</label>
+              <input {...bind('mic_gate')} type="number" min="20" max="100" />
+              <div class="hint">quieter than -{form.mic_gate || '?'} dBFS counts as silence; raise it in a quiet room</div></div>
+            <div><label for="beat_sens">Beat sensitivity</label>
+              <input {...bind('beat_sens')} type="number" min="10" max="40" />
+              <div class="hint">an onset must stand {(+form.beat_sens / 10 || 0).toFixed(1)}× its recent spread above
+                the average; lower = more onsets</div></div>
+          </div>
+          <div class="hint">Wiring: VDD → 3V3, GND → GND, L/R → GND, SCK/WS/SD to the pins above. The
+            start page shows what it hears. Pin changes restart the bridge; the gate and sensitivity
+            apply at once.</div>
         </section>
 
         <Firmware status={status} />

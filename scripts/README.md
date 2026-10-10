@@ -87,6 +87,37 @@ Each effect in the list runs as a **child**, loaded with `effect(name)`:
 Channels an effect set keep their last value when the next one takes over, so a colour chase after
 a circle holds the heads where the circle left them.
 
+## Music: the `audio` object
+
+With an INMP441 microphone on the bridge (see the main README), every frame gets the analysis of
+what it hears. Without one, the start page's **Demo** button plays a synthesized 120 BPM track
+into the same analysis.
+
+| | |
+|---|---|
+| `audio.on` | a microphone is configured, or the demo runs |
+| `audio.signal` | sound above the noise gate (Settings) |
+| `audio.level`, `audio.bass`, `audio.mid`, `audio.high` | loudness overall and in 40–150 Hz / 150–2000 Hz / 2–8 kHz, 0..1 |
+| `audio.bands[0..15]` | 16 bands, 40 Hz to 10 kHz, 0..1 |
+| `audio.beat` | `true` on the frame of each beat: a steady grid locked to the music once there's a tempo, before that each detected kick |
+| `audio.beats` | beats counted so far |
+| `audio.bpm` | tempo; 0 until it's found (a few seconds of music) |
+| `audio.phase` | 0..1 through the current beat |
+| `audio.time` | the beat clock: beats elapsed since the script started, smooth (6.5 = halfway through the seventh). It runs at 120 BPM while there's no tempo. |
+
+All levels are auto-gained, so they reach 1 whatever the room volume; below the noise gate they
+fall to 0. The beat values follow the *Offset* slider on the start page's Sound card, which moves
+beats earlier or later to line the lights up with the music. Typical uses:
+
+```js
+if (audio.beat) step++;                         // something new on every beat
+h.dim = 255 * (0.3 + 0.7 * audio.bass);         // pump with the kick
+var p = audio.time / 4;                         // one motion cycle every 4 beats, in time
+```
+
+`beat-pulse.js` does all three. `cycle.js` has a `beats` slider to switch effects every N beats
+instead of every N seconds.
+
 ## API
 
 | | |

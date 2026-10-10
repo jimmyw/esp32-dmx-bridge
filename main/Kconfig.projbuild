@@ -29,4 +29,28 @@ menu "DMX Bridge"
         int "Default status LED GPIO (-1 = none)"
         default -1
 
+    config DMX_MIC_SCK_PIN
+        int "INMP441 microphone SCK GPIO (-1 = none)"
+        range -1 48
+        default 4
+
+    config DMX_MIC_WS_PIN
+        int "INMP441 microphone WS GPIO (-1 = none)"
+        range -1 48
+        default 5
+
+    config DMX_MIC_SD_PIN
+        int "INMP441 microphone SD GPIO (-1 = none)"
+        range -1 48
+        default 6
+
+    config DMX_RGB_LED_PIN
+        int "Addressable RGB LED (WS2812) GPIO for the beat blink (-1 = none)"
+        range -1 48
+        default 48
+        help
+            Flashes on every beat of the microphone analysis. Most ESP32-S3 boards have it on
+            GPIO 48 (DevKitC-1 v1.1: GPIO 38); some only connect it once their "RGB" solder
+            jumper is bridged. Test it with `rgbled 255 255 255` on the serial console.
+
 endmenu

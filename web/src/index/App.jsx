@@ -5,6 +5,7 @@ import { usePersisted } from '../common/persisted';
 import { ParamList, label } from '../common/ParamList';
 import { runScript, stopScript } from '../common/scripts';
 import { Status, useStatus } from '../common/Status';
+import { Audio } from './Audio';
 
 /*
  * Start page: one big button per effect script (tap to run, tap the running one to stop; its
@@ -149,6 +150,7 @@ export function App() {
       )}
 
       <div class="status-wrap">
+        <Audio />
         <Status status={status} offline={statusOffline} names={names} />
       </div>
     </main>

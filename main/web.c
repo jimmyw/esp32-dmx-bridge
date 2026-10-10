@@ -1,9 +1,11 @@
 #include "web.h"
 
+#include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include "assets.h"
+#include "audio.h"
 #include "script_web.h"
 #include "cJSON.h"
 #include "config.h"
@@ -15,6 +17,7 @@
 #include "esp_log.h"
 #include "esp_ota_ops.h"
 #include "esp_system.h"
+#include "esp_task_wdt.h"
 #include "esp_timer.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
@@ -99,6 +102,13 @@ static esp_err_t status_get(httpd_req_t *req)
     const esp_partition_t *running = esp_ota_get_running_partition();
     cJSON_AddStringToObject(r, "partition", running ? running->label : "");
     assets_add_status(r);
+    audio_state_t au;
+    audio_get(&au);
+    cJSON *ao = cJSON_AddObjectToObject(r, "audio");
+    cJSON_AddBoolToObject(ao, "mic", au.mic);
+    cJSON_AddBoolToObject(ao, "demo", au.demo);
+    cJSON_AddBoolToObject(ao, "signal", au.signal);
+    cJSON_AddNumberToObject(ao, "bpm", roundf(au.bpm * 10) / 10);
 
     cJSON *w = cJSON_AddObjectToObject(r, "wifi");
     cJSON_AddBoolToObject(w, "sta", wifi_mgr_sta_connected());
@@ -157,6 +167,12 @@ static esp_err_t config_get(httpd_req_t *req)
     cJSON_AddNumberToObject(r, "refresh_hz", g_config.refresh_hz);
     cJSON_AddNumberToObject(r, "on_loss", g_config.on_loss);
     cJSON_AddNumberToObject(r, "loss_timeout_ms", g_config.loss_timeout_ms);
+    cJSON_AddNumberToObject(r, "mic_sck", g_config.mic_sck);
+    cJSON_AddNumberToObject(r, "mic_ws", g_config.mic_ws);
+    cJSON_AddNumberToObject(r, "mic_sd", g_config.mic_sd);
+    cJSON_AddNumberToObject(r, "mic_gate", g_config.mic_gate);
+    cJSON_AddNumberToObject(r, "beat_sens", g_config.beat_sens);
+    cJSON_AddNumberToObject(r, "beat_offset_ms", g_config.beat_offset_ms);
     return send_json(req, r);
 }
 
@@ -283,6 +299,36 @@ static esp_err_t scan_get(httpd_req_t *req)
     return send_json(req, r);
 }
 
+// GET /api/audio: the full analysis (levels, bands, spectrum, beats, tempo)
+static esp_err_t audio_get_handler(httpd_req_t *req)
+{
+    return send_json(req, audio_json());
+}
+
+// POST /api/audio {"demo":true}: synthesized 120 BPM test signal instead of the microphone
+static esp_err_t audio_post(httpd_req_t *req)
+{
+    char body[64] = "";
+    int n = req->content_len < (int)sizeof(body) - 1 ? req->content_len : (int)sizeof(body) - 1;
+    if (n > 0 && httpd_req_recv(req, body, n) == n) {
+        body[n] = '\0';
+    }
+    cJSON *root = cJSON_Parse(body);
+    const cJSON *demo = cJSON_GetObjectItemCaseSensitive(root, "demo");
+    bool ok = cJSON_IsBool(demo);
+    if (ok) {
+        audio_set_demo(cJSON_IsTrue(demo));
+    }
+    cJSON_Delete(root);
+    cJSON *r = audio_json();
+    cJSON_AddBoolToObject(r, "ok", ok);
+    if (!ok) {
+        cJSON_AddStringToObject(r, "error", "expected {\"demo\":true|false}");
+        httpd_resp_set_status(req, "400 Bad Request");
+    }
+    return send_json(req, r);
+}
+
 static esp_err_t reboot_post(httpd_req_t *req)
 {
     cJSON *r = cJSON_CreateObject();
@@ -299,7 +345,7 @@ static esp_err_t factory_reset_post(httpd_req_t *req)
 }
 
 // Firmware upload: the request body is the raw dmx_bridge.bin.
-static esp_err_t ota_post(httpd_req_t *req)
+static esp_err_t ota_receive(httpd_req_t *req)
 {
     const esp_partition_t *part = esp_ota_get_next_update_partition(NULL);
     if (!part) {
@@ -381,6 +427,30 @@ static esp_err_t ota_post(httpd_req_t *req)
     return res;
 }
 
+// While the app slot is erased and written, each flash operation stalls this core and parks the
+// other one in a busy-wait, so neither idle task runs for seconds and the task watchdog warns.
+// Expected during an upload: stop watching the idle tasks until it's done.
+static esp_err_t ota_post(httpd_req_t *req)
+{
+    esp_task_wdt_config_t wdt = {
+        .timeout_ms = CONFIG_ESP_TASK_WDT_TIMEOUT_S * 1000,
+        .idle_core_mask = 0,
+#ifdef CONFIG_ESP_TASK_WDT_PANIC
+        .trigger_panic = true,
+#endif
+    };
+    esp_task_wdt_reconfigure(&wdt);
+    esp_err_t res = ota_receive(req);
+#ifdef CONFIG_ESP_TASK_WDT_CHECK_IDLE_TASK_CPU0
+    wdt.idle_core_mask |= 1 << 0;
+#endif
+#ifdef CONFIG_ESP_TASK_WDT_CHECK_IDLE_TASK_CPU1
+    wdt.idle_core_mask |= 1 << 1;
+#endif
+    esp_task_wdt_reconfigure(&wdt);
+    return res;
+}
+
 // Anything else -> the start page; captive-portal probes (/generate_204, /hotspot-detect.html) in
 // setup-AP mode -> the settings page, where Wi-Fi is configured.
 static esp_err_t redirect_get(httpd_req_t *req)
@@ -420,6 +490,8 @@ esp_err_t web_start(void)
         { .uri = "/api/reboot",        .method = HTTP_POST, .handler = reboot_post },
         { .uri = "/api/factory_reset", .method = HTTP_POST, .handler = factory_reset_post },
         { .uri = "/api/ota",           .method = HTTP_POST, .handler = ota_post },
+        { .uri = "/api/audio",         .method = HTTP_GET,  .handler = audio_get_handler },
+        { .uri = "/api/audio",         .method = HTTP_POST, .handler = audio_post },
         { .uri = "/*",                 .method = HTTP_GET,  .handler = redirect_get },
     };
     const size_t n = sizeof(uris) / sizeof(uris[0]);

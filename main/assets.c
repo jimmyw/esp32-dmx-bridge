@@ -10,6 +10,8 @@
 #include "esp_app_desc.h"
 #include "esp_crc.h"
 #include "esp_log.h"
+#include "freertos/FreeRTOS.h"
+#include "freertos/task.h"
 #include "esp_spiffs.h"
 
 static const char *TAG = "assets";
