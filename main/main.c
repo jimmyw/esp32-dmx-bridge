@@ -10,6 +10,7 @@
 #include "esp_ota_ops.h"
 #include "names.h"
 #include "scenes.h"
+#include "script.h"
 #include "esp_system.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
@@ -100,6 +101,7 @@ void app_main(void)
     ESP_ERROR_CHECK(artnet_start());
     ESP_ERROR_CHECK(sacn_start());
     assets_init();   // web pages partition; built-in pages are used without it
+    script_init();   // effect scripts; restarts the one that was running
     ESP_ERROR_CHECK(web_start());
     xTaskCreate(ui_task, "ui", 3072, NULL, 3, NULL);
     ESP_ERROR_CHECK(cli_start());

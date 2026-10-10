@@ -7,7 +7,7 @@ import { useEffect, useReducer } from 'preact/hooks';
  *
  * Protocol (see main/console.c):
  *   client -> bridge  binary [ch_hi, ch_lo, value]*  (ch 0xFFFF = master), text "clear"
- *   bridge -> client  binary [0x01][master][manual x512][output x512], text "names" / "scenes"
+ *   bridge -> client  binary [0x01][master][manual x512][output x512], text "names" / "scenes" / "scripts"
  */
 export const N = 512;
 export const MASTER = 0xFFFF;
@@ -65,7 +65,7 @@ export function useLive() {
   }, []);
 }
 
-// Called with 'open' (connected), 'names' or 'scenes' (the bridge's copy changed).
+// Called with 'open' (connected), 'names', 'scenes' or 'scripts' (the bridge's copy changed).
 export function useLiveEvents(fn) {
   useEffect(() => {
     eventListeners.add(fn);

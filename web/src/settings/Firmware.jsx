@@ -73,7 +73,7 @@ export function Firmware({ status }) {
       <div class="hint">Select <code>build/dmx_bridge.bin</code> to update the firmware: the bridge restarts
         into it and rolls back automatically if it fails to start. Or select <code>build/dmx_bridge_www.tar</code>
         to update only the web pages, without a restart. DMX output may stutter during an upload.
-        If an uploaded web UI breaks, open <a href="/?builtin">/?builtin</a> for the firmware's own copy.</div>
+        If an uploaded web UI breaks, open <a href="/settings?builtin">/settings?builtin</a> for the firmware's own copy.</div>
     </section>
   );
 }

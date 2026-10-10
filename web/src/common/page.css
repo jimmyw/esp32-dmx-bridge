@@ -25,3 +25,12 @@ button.danger{background:var(--bad)}
 #chan div i{position:absolute;left:0;right:0;bottom:0;background:var(--acc)}
 @media (max-width:560px){#chan{grid-template-columns:repeat(16,1fr)}}
 .pill{font-size:12px;padding:2px 8px;border-radius:99px;border:1px solid var(--line);color:var(--mut);font-weight:400}
+/* shared by the board and scripts pages */
+.sp{flex:1}
+button.small{padding:5px 12px;font-size:13px}
+button:disabled{opacity:.45;cursor:default}
+.params{display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:8px 24px}
+.param{display:flex;align-items:center;gap:10px;font-size:14px;margin:0;color:var(--fg)}
+.param .pn{width:80px;color:var(--mut);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.param input{flex:1;padding:0;accent-color:var(--acc);min-height:28px}
+.param .pv{width:44px;text-align:right;font-variant-numeric:tabular-nums}

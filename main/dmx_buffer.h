@@ -44,6 +44,12 @@ void dmx_buffer_set_manual_master(uint8_t master);
 void dmx_buffer_clear_manual(void);
 void dmx_buffer_get_manual(uint8_t out[DMX_SLOTS], uint8_t *master);
 
+// Script layer (script.c): channels a running script owns replace the network input; the
+// manual layer still merges highest-takes-precedence on top. values/owned: 512 entries each,
+// NULL owned = release every channel.
+void dmx_buffer_set_script(const uint8_t *values, const bool *owned);
+void dmx_buffer_get_input(uint8_t out[DMX_SLOTS]);   // network layer only (no script, no manual)
+
 void dmx_buffer_count_frame(void);
 void dmx_buffer_get_stats(dmx_stats_t *stats);
 void dmx_buffer_peek(uint8_t *out, uint16_t n);   // first n final output slots (after merge)

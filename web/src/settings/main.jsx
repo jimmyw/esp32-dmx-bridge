@@ -1,6 +1,5 @@
 import { render } from 'preact';
 import { App } from './App';
 import '../common/page.css';
-import './board.css';
 
 render(<App />, document.getElementById('app'));

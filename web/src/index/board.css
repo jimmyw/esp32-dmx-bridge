@@ -1,0 +1,43 @@
+main.board{max-width:960px}
+.board header{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin:4px 0 16px}
+.board h1{margin:0}
+.board nav{display:flex;gap:6px}
+.board nav button{padding:7px 12px;font-size:14px}
+.banner{display:block;padding:10px 14px;border-radius:8px;margin-bottom:14px;background:var(--card);
+  border:1px solid var(--acc);color:var(--fg);text-decoration:none}
+.banner.bad{border-color:var(--bad);color:var(--bad)}
+.tiles{display:grid;grid-template-columns:repeat(auto-fill,minmax(170px,1fr));gap:12px}
+@media (max-width:420px){.tiles{grid-template-columns:1fr 1fr;gap:10px}}
+.tile{position:relative;min-height:110px;display:flex;flex-direction:column;align-items:flex-start;justify-content:space-between;
+  text-align:left;background:var(--card);color:var(--fg);border:1px solid var(--line);border-radius:12px;padding:14px;
+  font-size:17px;font-weight:600;touch-action:manipulation;transition:background .15s,border-color .15s}
+.tile:hover{border-color:var(--acc)}
+.tile .tl{overflow-wrap:anywhere}
+.tile .ts{font-size:12px;font-weight:400;color:var(--mut);min-height:15px}
+.tile.on{background:var(--acc);border-color:var(--acc);color:#fff}
+.tile.on .ts{color:#fff}
+.tile.on::after{content:"";position:absolute;top:14px;right:14px;width:10px;height:10px;border-radius:50%;
+  background:#fff;animation:blink 1.2s ease-in-out infinite}
+@keyframes blink{50%{opacity:.25}}
+.tile.bad{border-color:var(--bad)}
+.tile.bad .ts{color:var(--bad)}
+.tile.busy{opacity:.6}
+.empty{color:var(--mut)}
+.err{color:var(--bad);font:13px/1.4 ui-monospace,SFMono-Regular,Menlo,monospace;margin-top:12px;overflow-wrap:anywhere}
+.params-card{margin-top:16px}
+.ph{display:flex;align-items:center;gap:8px;margin-bottom:8px}
+.ph h2{margin:0}
+.sec-h{margin:18px 0 10px}
+.board header + .sec-h,.banner + .sec-h{margin-top:0}
+.sec-row{display:flex;align-items:center;gap:8px;margin-top:22px}
+.sec-row .sec-h{margin:0}
+.sec-row + .tiles,.sec-row + .empty{margin-top:10px}
+.fade{display:flex;align-items:center;gap:6px;margin:0;font-size:13px}
+.fade input{width:70px;padding:5px 6px}
+.tiles.scenes{grid-template-columns:repeat(auto-fill,minmax(140px,1fr))}
+.tile.scene{min-height:76px;font-size:15px}
+.tile.scene.on{background:var(--ok);border-color:var(--ok)}
+.tile.scene.on::after{display:none}
+.tile.scene.fading{animation:fadepulse .7s ease-in-out infinite alternate}
+@keyframes fadepulse{to{opacity:.65}}
+.status-wrap{margin-top:22px}

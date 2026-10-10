@@ -4,11 +4,13 @@
 #include <stdlib.h>
 #include <string.h>
 #include "assets.h"
+#include "script_web.h"
 #include "cJSON.h"
 #include "config.h"
 #include "console.h"
 #include "dmx_buffer.h"
 #include "esp_app_desc.h"
+#include "esp_heap_caps.h"
 #include "esp_http_server.h"
 #include "esp_log.h"
 #include "esp_ota_ops.h"
@@ -92,7 +94,8 @@ static esp_err_t status_get(httpd_req_t *req)
     cJSON_AddStringToObject(r, "name", g_config.name);
     cJSON_AddStringToObject(r, "hostname", g_config.hostname);
     cJSON_AddNumberToObject(r, "uptime", (double)(now / 1000000));
-    cJSON_AddNumberToObject(r, "heap", esp_get_free_heap_size());
+    cJSON_AddNumberToObject(r, "heap", heap_caps_get_free_size(MALLOC_CAP_INTERNAL));
+    cJSON_AddNumberToObject(r, "psram", heap_caps_get_free_size(MALLOC_CAP_SPIRAM));
     const esp_partition_t *running = esp_ota_get_running_partition();
     cJSON_AddStringToObject(r, "partition", running ? running->label : "");
     assets_add_status(r);
@@ -378,13 +381,14 @@ static esp_err_t ota_post(httpd_req_t *req)
     return res;
 }
 
-// Anything else (captive-portal probes such as /generate_204, /hotspot-detect.html) -> portal.
+// Anything else -> the start page; captive-portal probes (/generate_204, /hotspot-detect.html) in
+// setup-AP mode -> the settings page, where Wi-Fi is configured.
 static esp_err_t redirect_get(httpd_req_t *req)
 {
     char loc[48] = "/";
     esp_netif_ip_info_t ip;
     if (wifi_mgr_ap_active() && !wifi_mgr_sta_connected() && wifi_mgr_get_ip_info(&ip) == ESP_OK) {
-        snprintf(loc, sizeof(loc), "http://" IPSTR "/", IP2STR(&ip.ip));
+        snprintf(loc, sizeof(loc), "http://" IPSTR "/settings", IP2STR(&ip.ip));
     }
     httpd_resp_set_status(req, "302 Found");
     httpd_resp_set_hdr(req, "Location", loc);
@@ -394,7 +398,7 @@ static esp_err_t redirect_get(httpd_req_t *req)
 esp_err_t web_start(void)
 {
     httpd_config_t cfg = HTTPD_DEFAULT_CONFIG();
-    cfg.max_uri_handlers = 24;
+    cfg.max_uri_handlers = 32;
     cfg.max_open_sockets = 10;
     cfg.stack_size = 8192;
     cfg.lru_purge_enable = true;
@@ -424,6 +428,7 @@ esp_err_t web_start(void)
     }
     assets_register(server);
     console_register(server);
+    script_web_register(server);
     httpd_register_uri_handler(server, &uris[n - 1]);   // "/*" catch-all last
     ESP_LOGI(TAG, "web UI on port 80");
     return ESP_OK;

@@ -8,3 +8,6 @@ esp_err_t console_register(httpd_handle_t server);
 
 // Tell connected console pages that channel names changed (they re-fetch /api/names).
 void console_names_changed(void);
+
+// Send a text event to every console client; msg must be a static string.
+void console_broadcast(const char *msg);

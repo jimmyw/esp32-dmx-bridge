@@ -77,8 +77,9 @@ about +2 V and needs no bias resistors.
 ## Build & flash
 
 Built with ESP-IDF v6.2 for a 16 MB flash ESP32-S3 (`~/esp/esp-idf`). Partitions (`partitions.csv`):
-2 × 4 MB OTA app slots, `storage` (4 MB raw: channel names and scenes), `www` (1 MB SPIFFS: the web
-pages); the last ~3 MB are unused.
+2 × 4 MB OTA app slots, `storage` (1 MB raw: channel names and scenes), `scripts` (3 MB SPIFFS:
+effect scripts), `www` (1 MB SPIFFS: the web pages); the last ~3 MB are unused. The board's 2 MB
+PSRAM holds the script engine's heap; it also runs without PSRAM, with a 64 KB script heap.
 
 ```bash
 . ~/esp/esp-idf/export.sh
@@ -88,8 +89,12 @@ idf.py -p /dev/serial/by-id/usb-Espressif_USB_JTAG_serial_debug_unit_68:B6:B3:47
 ```
 
 `idf.py flash` writes the bootloader, partition table, app and the `www` image; it never touches
-`nvs` (settings) or `storage` (names, scenes). A change to `partitions.csv` needs this USB flash —
-over-the-air updates can't change the partition table.
+`nvs` (settings), `storage` (names, scenes) or `scripts`. A change to `partitions.csv` needs this USB
+flash, because over-the-air updates can't change the partition table. Updating from a firmware
+without the `scripts` partition (before 1.9.0) needs one USB flash: shrinking `storage` keeps the
+names and scenes, and the first boot formats `scripts` (about 20 s) and writes the example scripts.
+`idf.py flash` also resets the boot slot to `ota_0`; `idf.py app-flash` alone writes `ota_0` while
+the bridge may be booting the other slot after an OTA update.
 
 The build also needs **Node.js/npm**: CMake runs `npm ci` (first build, or when
 `web/package-lock.json` changes) and `npm run build` in `web/`, which uses webpack to bundle each web
@@ -97,10 +102,14 @@ page with its CSS and JS into one minified, gzipped HTML file. The pages go into
 (`build/www.bin`), into the package `build/dmx_bridge_www.tar`, and into the firmware itself as a
 fallback copy.
 The pages are small [Preact](https://preactjs.com) apps written in JSX (compiled by esbuild-loader):
-`web/src/index/` is the settings page, `web/src/console/` the fader console (`live.js` holds the
-WebSocket connection and the 512-channel state), `web/src/common/` shared helpers. Edit them
+`web/src/index/` is the start page (script board), `web/src/settings/` the settings page, `web/src/console/` the fader console (`live.js` holds the
+WebSocket connection and the 512-channel state), `web/src/scripts/` the script editor,
+`web/src/common/` shared helpers. Edit them
 there; `idf.py build` re-bundles them when they change. To build only the web UI:
 `cd web && npm ci && npm run build` (output in `web/dist/`: `www/` and `dmx_bridge_www.tar`).
+
+The script engine is [Duktape](https://duktape.org) 2.7.0, vendored in `components/duktape/` with a
+few config changes (see its README).
 
 Default pins, UART, AP password and hostname prefix are under `idf.py menuconfig` → *DMX Bridge*.
 All of them except the AP password can also be changed in the web UI.
@@ -109,8 +118,8 @@ All of them except the AP password can also be changed in the web UI.
 
 1. With no Wi-Fi stored, the bridge opens an access point **`DMX-Bridge-XXXX`**
    (password `dmxbridge`). XXXX is the end of its MAC address.
-2. Join it with a phone or laptop. The captive portal opens; if it doesn't, browse to
-   `http://192.168.4.1`.
+2. Join it with a phone or laptop. The captive portal opens the settings page; if it doesn't,
+   browse to `http://192.168.4.1/settings`.
 3. Click *Scan networks*, pick your SSID, enter the password and click **Save**. The bridge
    restarts and joins your Wi-Fi.
 4. Find it at **`http://dmx-bridge-XXXX.local`**, or check your router's DHCP list.
@@ -186,7 +195,40 @@ A lighting-desk style page at `http://dmx-bridge-XXXX.local/console` (button on 
   `{"action":"recall|save|rename|delete","id":1-64,"name":"…","fade_ms":2000}`.
 * Values can show as DMX (0–255) or %. The chosen bank and units are remembered per browser.
 
+## Effect scripts (`/scripts`)
+
+JavaScript effects that run on the bridge itself: coordinated pan/tilt movement, colour chases,
+anything you can compute per frame. They run without QLC+ or a browser, and the running script
+restarts after a reboot. The **Effect scripts** page has the editor (with line numbers, Ctrl+S,
+error line jump), Run/Stop, the script's live parameter sliders and its log. The console's **FX**
+button shows a bar to start and stop scripts and adjust their parameters.
+
+```js
+var heads = [1, 13, 25, 37].map(function (a) { return fixture(a, { pan: [1, 2], tilt: [3, 4], dim: 8 }); });
+var phase = 0;
+function frame(t, dt) {
+  phase += param('speed', 0.15, 0, 1) * dt;           // live slider
+  heads.forEach(function (h, i) {
+    var a = 2 * Math.PI * (phase - i / 4);           // each head a quarter circle behind
+    h.pan = 127.5 + 40 * Math.cos(a);
+    h.tilt = 127.5 + 40 * Math.sin(a);
+    h.dim = 255;
+  });
+}
+```
+
+Channels a script sets replace the network input; all others still follow QLC+. Examples and the
+full API are in [`scripts/`](scripts/README.md).
+
 ## Web UI
+
+The start page (`/`) is a button board. **Effects** has one big button per effect script: tap one
+to run it, and tap the running one to stop it. The running script's parameter sliders show below
+the buttons. **Scenes** has one button per stored scene: tap one to recall it, with the fade time
+set next to it (shared with the console's scene bar). **Status** below them shows Wi-Fi, the DMX
+input, packet and frame rates and live bars for all 512 output channels.
+From there, *Console* opens the fader console, *Scripts* the editor and *Settings* the settings
+page (`/settings`):
 
 * **Status:** Wi-Fi, IP, active source, packets/s, DMX frames/s and a live view of all 512
   output channels.
@@ -205,23 +247,24 @@ JSON API: `GET /api/status`, `GET/POST /api/config`, `GET /api/scan`, `POST /api
 `POST /api/factory_reset`,
 `POST /api/ota` (raw `.bin` as the body, e.g.
 `curl --data-binary @build/dmx_bridge.bin http://dmx-bridge-XXXX.local/api/ota`),
-`POST /api/www` (web package `.tar` as the body).
+`POST /api/www` (web package `.tar` as the body). Scripts: see [`scripts/README.md`](scripts/README.md).
 
 ### Web pages
 
-The pages are built from `web/src/` (`index/` = settings, `console/` = fader console) into one
-gzipped HTML file each, served at `/` and `/console` with `Content-Encoding: gzip` (see
+The pages are built from `web/src/` (`index/` = script board, `settings/`, `console/` = fader
+console, `scripts/` = script editor) into one gzipped HTML file each, served at `/`, `/settings`,
+`/console` and `/scripts` with `Content-Encoding: gzip` (see
 `main/assets.c`). They live on the `www` SPIFFS partition, and the firmware carries the copies it
 was built with:
 
-* **Web-only update:** upload `dmx_bridge_www.tar` (a plain tar of `index.html.gz`,
-  `console.html.gz` and `manifest.json`). The bridge unpacks it to temporary files and only swaps
+* **Web-only update:** upload `dmx_bridge_www.tar` (a plain tar of the `*.html.gz` pages and
+  `manifest.json`). The bridge unpacks it to temporary files and only swaps
   them in once the whole archive arrived and checked out, so a broken upload leaves the old pages
   in place.
 * **Newest wins:** each set has a build time in its `manifest.json`. The bridge serves whichever is
   newer — an uploaded package, or the pages inside the running firmware — so a firmware update
   brings its own newer UI, and a package older than the firmware's pages is refused.
-* **Recovery:** `/?builtin` (and `/console?builtin`) always serves the firmware's own copy, e.g. if
+* **Recovery:** `?builtin` on any page (`/settings?builtin`, `/console?builtin`…) always serves the firmware's own copy, e.g. if
   an uploaded UI is broken.
 * The settings page's Firmware card shows which web UI is running. Browsers revalidate pages on
   every load (ETag from the package / firmware build), so an update shows up on the next reload.
@@ -242,6 +285,7 @@ The USB-Serial/JTAG port carries the log and a command line (`dmx>` prompt):
 | `name <ch> [text]` / `names` | set (no text = remove) / list channel names |
 | `hide <ch>` / `unhide <ch\|all>` | hide / show channels on the web console |
 | `scene list` / `save <n> [name]` / `recall <n> [fade s]` / `rename <n> <name>` / `delete <n>` | console scenes |
+| `script [list]` / `run <name>` / `stop` / `log` / `param <name> <value>` | effect scripts |
 | `dmx [n]` | show the first n output channels (default 32) |
 | `log <level> [tag]` | change log verbosity, e.g. `log warn` to quiet the console |
 | `reboot` / `factory_reset yes` | restart / erase all settings |

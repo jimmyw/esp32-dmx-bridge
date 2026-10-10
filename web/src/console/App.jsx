@@ -5,6 +5,7 @@ import { usePersisted } from '../common/persisted';
 import { ChannelMenu } from './ChannelMenu';
 import { FullscreenButton } from './FullscreenButton';
 import { Scenes } from './Scenes';
+import { ScriptBar } from './ScriptBar';
 import { MasterStrip, Strip } from './Strip';
 import { N, clearAll, isConnected, useLive, useLiveEvents } from './live';
 
@@ -32,6 +33,7 @@ export function App() {
   const [bankCh, setBankCh] = usePersisted('bank', 0);
   const [showHidden, setShowHidden] = usePersisted('showHidden', false);
   const [showScenes, setShowScenes] = usePersisted('showScenes', true);
+  const [showFx, setShowFx] = usePersisted('showFx', false);
   const [bankSize, setBankSize] = useState(() => bankSizeFor(innerWidth));
   // Channel names (0-based ch -> name) and explicitly hidden channels, stored on the bridge.
   const [names, setNames] = useState({});
@@ -141,13 +143,17 @@ export function App() {
         )}
         <button id="scnBtn" class={showScenes ? 'on' : ''} onClick={() => setShowScenes(!showScenes)}
                 title={showScenes ? 'hide the scenes toolbar' : 'show the scenes toolbar'}>Scenes</button>
+        <button id="fxBtn" class={showFx ? 'on' : ''} onClick={() => setShowFx(!showFx)}
+                title={showFx ? 'hide the effect scripts toolbar' : 'show the effect scripts toolbar'}>FX</button>
         <button id="pctBtn" class={pct ? 'on' : ''} onClick={() => setPct(!pct)}
                 title={pct ? 'showing values in percent – tap for DMX 0-255' : 'show values in percent'}>%</button>
         <button title="set all console faders to 0" onClick={clear}>{clearArmed ? 'Sure?' : 'Clear'}</button>
         <FullscreenButton />
-        <a class="btn" href="/">Settings</a>
+        <a class="btn" href="/" title="script board">Home</a>
+        <a class="btn" href="/settings">Settings</a>
       </header>
       <Scenes visible={showScenes} />
+      {showFx && <ScriptBar />}
       {menuCh >= 0 && (
         <ChannelMenu key={menuCh} ch={menuCh} names={names} hidden={hidden} nameMax={nameMax}
                      onApply={applyMenu} onClose={() => setMenuCh(-1)} onTab={tabMenu} />

@@ -1,0 +1,50 @@
+--- a/src/duk_config.h
++++ b/src/duk_config.h
+@@ -2962,11 +2962,12 @@
+ #undef DUK_USE_EXEC_INDIRECT_BOUND_CHECK
+ #undef DUK_USE_EXEC_PREFER_SIZE
+ #define DUK_USE_EXEC_REGCONST_OPTIMIZE
+-#undef DUK_USE_EXEC_TIMEOUT_CHECK
++extern int script_exec_timeout(void *udata);
++#define DUK_USE_EXEC_TIMEOUT_CHECK(udata) script_exec_timeout((udata))
+ #undef DUK_USE_EXPLICIT_NULL_INIT
+ #undef DUK_USE_EXTSTR_FREE
+ #undef DUK_USE_EXTSTR_INTERN_CHECK
+-#undef DUK_USE_FASTINT
++#define DUK_USE_FASTINT
+ #define DUK_USE_FAST_REFCOUNT_DEFAULT
+ #undef DUK_USE_FATAL_HANDLER
+ #define DUK_USE_FATAL_MAXLEN 128
+@@ -3004,7 +3005,7 @@
+ #define DUK_USE_HTML_COMMENTS
+ #define DUK_USE_IDCHAR_FASTPATH
+ #undef DUK_USE_INJECT_HEAP_ALLOC_ERROR
+-#undef DUK_USE_INTERRUPT_COUNTER
++#define DUK_USE_INTERRUPT_COUNTER
+ #undef DUK_USE_INTERRUPT_DEBUG_FIXUP
+ #define DUK_USE_JC
+ #define DUK_USE_JSON_BUILTIN
+@@ -3020,10 +3021,11 @@
+ #define DUK_USE_LEXER_SLIDING_WINDOW
+ #undef DUK_USE_LIGHTFUNC_BUILTINS
+ #define DUK_USE_LITCACHE_SIZE 256
+-#define DUK_USE_MARK_AND_SWEEP_RECLIMIT 256
++#define DUK_USE_MARK_AND_SWEEP_RECLIMIT 32
+ #define DUK_USE_MATH_BUILTIN
+ #define DUK_USE_NATIVE_CALL_RECLIMIT 1000
+-#undef DUK_USE_NATIVE_STACK_CHECK
++extern int script_native_stack_check(void);
++#define DUK_USE_NATIVE_STACK_CHECK() script_native_stack_check()
+ #define DUK_USE_NONSTD_ARRAY_SPLICE_DELCOUNT
+ #undef DUK_USE_NONSTD_FUNC_CALLER_PROPERTY
+ #undef DUK_USE_NONSTD_FUNC_SOURCE_PROPERTY
+--- a/src/duktape.c
++++ b/src/duktape.c
+@@ -69607,6 +69607,7 @@
+ DUK_LOCAL void duk__comp_recursion_increase(duk_compiler_ctx *comp_ctx) {
+ 	DUK_ASSERT(comp_ctx != NULL);
+ 	DUK_ASSERT(comp_ctx->recursion_depth >= 0);
++	duk_native_stack_check(comp_ctx->thr); /* dmx-bridge: the compiler recurses on the C stack too */
+ 	if (comp_ctx->recursion_depth >= comp_ctx->recursion_limit) {
+ 		DUK_ERROR_RANGE(comp_ctx->thr, DUK_STR_COMPILER_RECURSION_LIMIT);
+ 		DUK_WO_NORETURN(return;);

@@ -41,7 +41,7 @@ button:disabled{opacity:.5;cursor:default}
 .btns button.fl:active,.btns button.fl.down{background:var(--acc);color:#000}
 #scenebar{display:flex;align-items:center;gap:6px;padding:6px 12px;background:var(--panel);border-bottom:1px solid var(--line)}
 #scenebar .lbl{color:var(--mut);font-size:12px;text-transform:uppercase;letter-spacing:.05em}
-#scenes{display:flex;gap:6px;overflow-x:auto;flex:1;scrollbar-width:thin;padding:2px 0}
+#scenes{display:flex;gap:6px;overflow-x:auto;flex:1;scrollbar-width:thin;scrollbar-color:var(--line) transparent;padding:2px 0}
 #scenes button{flex:0 0 auto;max-width:160px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 #scenes button.active{border-color:var(--acc);color:var(--acc)}
 #scenes button.fading{animation:pulse .6s ease-in-out infinite alternate}
@@ -60,7 +60,7 @@ button:disabled{opacity:.5;cursor:default}
 .strip.blank{visibility:hidden}
 .strip.hid{opacity:.45}
 .strip.hid .nm{border-style:dashed}
-#scnBtn.on,#pctBtn.on{background:var(--acc);color:#000}
+#scnBtn.on,#fxBtn.on,#pctBtn.on{background:var(--acc);color:#000}
 #hidBtn{display:inline-flex;align-items:center;gap:3px;padding:7px 8px}
 #hidBtn small{font-size:11px;font-variant-numeric:tabular-nums}
 #hidBtn.on{background:var(--acc);color:#000}
@@ -74,3 +74,15 @@ button:disabled{opacity:.5;cursor:default}
 #chmenu .row button{flex:1}
 [hidden]{display:none!important}
 @media (max-width:560px){header h1{display:none}.strip.master{flex-basis:60px}}
+#fxbar{background:var(--panel);border-bottom:1px solid var(--line);padding:6px 12px;display:flex;flex-direction:column;gap:6px}
+.fxrow{display:flex;align-items:center;gap:6px}
+#fxbar .lbl{color:var(--mut);font-size:12px;text-transform:uppercase;letter-spacing:.05em}
+#fx{display:flex;gap:6px;overflow-x:auto;flex:1;scrollbar-width:thin;scrollbar-color:var(--line) transparent;padding:2px 0}
+#fx button{flex:0 0 auto;max-width:160px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+#fx button.active{background:var(--acc);color:#000;border-color:var(--acc)}
+.fxerr{color:var(--bad);font-size:12px;font-family:ui-monospace,monospace;overflow-wrap:anywhere}
+#fxparams{display:grid;grid-template-columns:repeat(auto-fill,minmax(210px,1fr));gap:4px 14px}
+.param{display:flex;align-items:center;gap:8px;font-size:12px;min-width:0}
+.param .pn{color:var(--mut);width:64px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.param input{flex:1;min-width:0;accent-color:var(--acc)}
+.param .pv{width:38px;text-align:right;font-variant-numeric:tabular-nums;color:var(--acc)}

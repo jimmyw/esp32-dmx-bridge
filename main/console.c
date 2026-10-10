@@ -19,7 +19,7 @@ static const char *TAG = "console";
  *   client -> server: repeated 3-byte records [ch_hi, ch_lo, value]; ch 0..511, 0xFFFF = master.
  *                     text "clear" zeroes all console faders.
  *   server -> client: every PUSH_MS: [0x01][master][manual x512][output x512]
- *                     text "names" / "scenes" when those changed (clients re-fetch the API).
+ *                     text "names" / "scenes" / "scripts" when those changed (clients re-fetch).
  */
 #define PUSH_MS     66
 #define MASTER_CH   0xFFFF
@@ -145,6 +145,13 @@ static void broadcast_text_work(void *arg)
         if (httpd_ws_get_fd_info(s_server, fds[i]) == HTTPD_WS_CLIENT_WEBSOCKET && writable(fds[i])) {
             httpd_ws_send_frame_async(s_server, fds[i], &f);
         }
+    }
+}
+
+void console_broadcast(const char *msg)
+{
+    if (s_server) {
+        httpd_queue_work(s_server, broadcast_text_work, (void *)msg);
     }
 }
 

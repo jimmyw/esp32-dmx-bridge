@@ -1,179 +1,160 @@
 import { useEffect, useState } from 'preact/hooks';
 import { getJson, postJson } from '../common/api';
-import { useConfirm } from '../common/hooks';
-import { Firmware } from './Firmware';
-import { Status, useStatus } from './Status';
+import { useInterval } from '../common/hooks';
+import { usePersisted } from '../common/persisted';
+import { ParamSlider } from '../common/ParamSlider';
+import { runScript, stopScript } from '../common/scripts';
+import { Status, useStatus } from '../common/Status';
 
-const FIELDS = ['wifi_ssid', 'protocol', 'artnet_universe', 'sacn_universe', 'on_loss', 'loss_timeout_ms',
-                'refresh_hz', 'name', 'hostname', 'tx_pin', 'de_pin', 'uart', 'led_pin'];
-const NUMERIC = new Set(['protocol', 'artnet_universe', 'sacn_universe', 'on_loss', 'loss_timeout_ms',
-                         'refresh_hz', 'tx_pin', 'de_pin', 'uart', 'led_pin']);
+/*
+ * Start page: one big button per effect script (tap to run, tap the running one to stop; its
+ * live parameters show below) and one per stored scene (tap to recall it, with the console's fade
+ * time). Settings moved to /settings.
+ */
 
-function artHint(v) {
-  v = +v || 0;
-  return `Net ${v >> 8} · Sub ${(v >> 4) & 15} · Uni ${v & 15} (QLC+ universe ${v})`;
-}
+// "fan-circle" -> "Fan circle"
+const label = n => { const s = n.replace(/[-_]+/g, ' ').trim(); return s.charAt(0).toUpperCase() + s.slice(1); };
 
 export function App() {
-  const [status, offline] = useStatus();
+  const [st, setSt] = useState(null);
+  const [status, statusOffline] = useStatus();      // polls /api/status every second
   const [names, setNames] = useState({});
-  const [form, setForm] = useState(Object.fromEntries(FIELDS.map(k => [k, ''])));
-  const [pass, setPass] = useState('');
-  const [passSet, setPassSet] = useState(false);
-  const [networks, setNetworks] = useState([]);
-  const [scanMsg, setScanMsg] = useState('');
-  const [msg, setMsg] = useState({ text: '', bad: false });
-  const [resetArmed, tapReset] = useConfirm(4000);
+  const [offline, setOffline] = useState(false);
+  const [busy, setBusy] = useState('');          // script being started/stopped
+  const [msg, setMsg] = useState('');
+  const [scenes, setScenes] = useState(null);
+  const [fade, setFade] = usePersisted('fade', 0);   // shared with the console's scene bar
 
-  const loadConfig = async () => {
-    const c = await getJson('/api/config');
-    setForm(f => Object.fromEntries(FIELDS.map(k => [k, k in c ? String(c[k]) : f[k]])));
-    setPass('');
-    setPassSet(!!c.wifi_pass_set);
+  const refresh = async () => {
+    try {
+      const [s, sc] = await Promise.all([getJson('/api/scripts'), getJson('/api/scenes')]);
+      setSt(s);
+      setScenes(sc);
+      setOffline(false);
+    } catch (e) { setOffline(true); }
   };
-  useEffect(() => {
-    loadConfig().catch(() => {});
-    getJson('/api/names').then(r => setNames(r.names)).catch(() => {});
-  }, []);
+  useInterval(refresh, 1500);
+  useEffect(() => { getJson('/api/names').then(r => setNames(r.names)).catch(() => {}); }, []);
 
   const name = status ? status.name : 'DMX Bridge';
   useEffect(() => { document.title = name; }, [name]);
 
-  const say = (text, bad = false) => setMsg({ text, bad });
-  // Props for a form control bound to `form[k]`.
-  const bind = k => ({
-    id: k, name: k, value: form[k],
-    onInput: e => { const v = e.currentTarget.value; setForm(f => ({ ...f, [k]: v })); },
-  });
-
-  const scan = async () => {
-    setScanMsg('Scanning…');
+  const act = async (target, fn) => {
+    if (busy) return;
+    setBusy(target);
+    setMsg('');
     try {
-      const list = await getJson('/api/scan');
-      setNetworks(list);
-      setScanMsg(list.length ? `${list.length} networks – pick one in the SSID field` : 'No networks found');
-    } catch (e) {
-      setScanMsg('Scan failed');
-    }
+      const r = await fn();
+      setSt(r);
+      if (!r.ok) setMsg(r.error || 'failed');
+    } catch (e) { setMsg('connection failed'); }
+    setBusy('');
   };
+  const toggle = n => act(n, () => (st.running === n ? stopScript() : runScript(n)));
 
-  const save = async ev => {
-    ev.preventDefault();
-    const body = Object.fromEntries(FIELDS.map(k => [k, NUMERIC.has(k) ? +form[k] : form[k]]));
-    if (pass) body.wifi_pass = pass;
+  const recall = async id => {
+    const f = Math.max(0, Math.min(60, parseFloat(fade) || 0));
+    setScenes(sc => ({ ...sc, active: id, fading: f > 0 }));
+    setMsg('');
     try {
-      const r = await postJson('/api/config', body);
-      if (!r.ok) return say(r.error || 'Error', true);
-      say(r.reboot ? 'Saved – restarting…' : 'Saved');
-      if (r.reboot) setTimeout(() => location.reload(), 8000);
-      else loadConfig();
-    } catch (e) {
-      say('Save failed', true);
-    }
+      const r = await postJson('/api/scenes', { action: 'recall', id, fade_ms: Math.round(f * 1000) });
+      if (!r.ok) setMsg(r.error || 'recall failed');
+      setScenes(await getJson('/api/scenes'));
+    } catch (e) { setMsg('connection failed'); }
   };
 
-  const reboot = async () => {
-    await fetch('/api/reboot', { method: 'POST' });
-    say('Restarting…');
-    setTimeout(() => location.reload(), 8000);
-  };
-
-  const reset = async () => {
-    if (!tapReset()) return;
-    await fetch('/api/factory_reset', { method: 'POST' });
-    say('Settings erased – the bridge restarts in provisioning (AP) mode.');
-  };
+  const scripts = st ? [...st.scripts].sort((a, b) => a.name.localeCompare(b.name)) : [];
+  const running = st && st.running;
+  const failed = st && st.failed;
+  const setupMode = status && !status.wifi.sta && status.wifi.ap;
 
   return (
-    <main>
-      <h1><span>{name}</span> <span class="pill">{status ? 'v' + status.fw : ''}</span>
-        <a href="/console" style={{ marginLeft: 'auto' }}><button type="button">Open fader console</button></a></h1>
+    <main class="board">
+      <header>
+        <h1>{name}</h1>
+        <i class={'dot' + (status && status.dmx.signal ? ' on' : '')}
+           title={status && status.dmx.signal ? 'receiving DMX from the network' : 'no network DMX input'} />
+        <span class="sp" />
+        <nav>
+          <a href="/console"><button type="button" class="sec">Console</button></a>
+          <a href="/scripts"><button type="button" class="sec">Scripts</button></a>
+          <a href="/settings"><button type="button" class="sec">Settings</button></a>
+        </nav>
+      </header>
 
-      <Status status={status} offline={offline} names={names} />
+      {setupMode && (
+        <a class="banner" href="/settings">Not on Wi-Fi yet – open <b>Settings</b> to connect the bridge.</a>
+      )}
+      {(offline || statusOffline) && <div class="banner bad">Bridge not reachable – retrying…</div>}
 
-      <form onSubmit={save}>
-        <section class="card">
-          <h2>Wi-Fi</h2>
-          <div class="row">
-            <div><label for="wifi_ssid">Network (SSID)</label>
-              <input {...bind('wifi_ssid')} list="ssids" autocomplete="off" />
-              <datalist id="ssids">
-                {networks.map(n => (
-                  <option key={n.ssid} value={n.ssid}
-                          label={`${n.rssi} dBm · ch ${n.ch}${n.secure ? ' · 🔒' : ''}`} />
-                ))}
-              </datalist></div>
-            <div><label for="wifi_pass">Password</label>
-              <input id="wifi_pass" name="wifi_pass" type="password" autocomplete="new-password" value={pass}
-                     onInput={e => setPass(e.currentTarget.value)} />
-              <div class="hint">{passSet ? 'Saved – leave empty to keep' : ''}</div></div>
+      <h2 class="sec-h">Effects</h2>
+      <div class="tiles">
+        {scripts.map(s => {
+          const on = s.name === running, bad = failed && failed.name === s.name;
+          return (
+            <button key={s.name} type="button"
+                    class={'tile' + (on ? ' on' : '') + (bad ? ' bad' : '') + (busy === s.name ? ' busy' : '')}
+                    aria-pressed={on} title={on ? 'running – tap to stop' : bad ? failed.error : 'tap to run'}
+                    onClick={() => toggle(s.name)}>
+              <span class="tl">{label(s.name)}</span>
+              <span class="ts">{on ? 'Running' : bad ? 'Error' : busy === s.name ? '…' : ''}</span>
+            </button>
+          );
+        })}
+      </div>
+      {st && !scripts.length && (
+        <p class="empty">No effect scripts yet. Write one on the <a href="/scripts">Scripts</a> page.</p>
+      )}
+
+      {failed && <div class="err">{label(failed.name)}: {failed.error}</div>}
+      {msg && <div class="err">{msg}</div>}
+
+      {running && (
+        <section class="card params-card">
+          <div class="ph">
+            <h2>{label(running)}</h2>
+            <span class="sp" />
+            <a href={`/scripts?name=${encodeURIComponent(running)}`}><button type="button" class="sec small">Edit</button></a>
+            <button type="button" class="danger small" disabled={!!busy}
+                    onClick={() => act(running, stopScript)}>Stop</button>
           </div>
-          <div class="actions">
-            <button type="button" class="sec" onClick={scan}>Scan networks</button>
-            <span class="hint">{scanMsg}</span>
-          </div>
+          {st.params.length > 0 ? (
+            <div class="params">
+              {st.params.map(p => <ParamSlider key={running + '/' + p.name} p={p} />)}
+            </div>
+          ) : <p class="hint">This script has no parameters.</p>}
         </section>
+      )}
 
-        <section class="card">
-          <h2>DMX input</h2>
-          <div class="row">
-            <div><label for="protocol">Protocol</label>
-              <select {...bind('protocol')}>
-                <option value="3">Art-Net + sACN</option>
-                <option value="1">Art-Net only</option>
-                <option value="2">sACN (E1.31) only</option>
-              </select></div>
-            <div><label for="artnet_universe">Art-Net universe (port-address)</label>
-              <input {...bind('artnet_universe')} type="number" min="0" max="32767" />
-              <div class="hint">{artHint(form.artnet_universe)}</div></div>
-            <div><label for="sacn_universe">sACN universe</label>
-              <input {...bind('sacn_universe')} type="number" min="1" max="63999" /></div>
-          </div>
-          <div class="row">
-            <div><label for="on_loss">On signal loss</label>
-              <select {...bind('on_loss')}>
-                <option value="0">Hold last look</option>
-                <option value="1">Blackout</option>
-              </select></div>
-            <div><label for="loss_timeout_ms">Loss timeout (ms)</label>
-              <input {...bind('loss_timeout_ms')} type="number" min="500" max="60000" step="100" /></div>
-            <div><label for="refresh_hz">DMX refresh (Hz)</label>
-              <input {...bind('refresh_hz')} type="number" min="1" max="44" /></div>
-          </div>
-        </section>
-
-        <section class="card">
-          <h2>Device &amp; hardware</h2>
-          <div class="row">
-            <div><label for="name">Name</label><input {...bind('name')} maxLength={63} /></div>
-            <div><label for="hostname">Hostname (.local)</label><input {...bind('hostname')} maxLength={31} /></div>
-          </div>
-          <div class="row">
-            <div><label for="tx_pin">DMX TX GPIO</label>
-              <input {...bind('tx_pin')} type="number" min="0" max="48" /></div>
-            <div><label for="de_pin">RS485 DE GPIO</label>
-              <input {...bind('de_pin')} type="number" min="-1" max="48" />
-              <div class="hint">-1 = auto-direction module</div></div>
-            <div><label for="uart">UART</label>
-              <select {...bind('uart')}><option value="1">1</option><option value="2">2</option></select></div>
-            <div><label for="led_pin">Status LED GPIO</label>
-              <input {...bind('led_pin')} type="number" min="-1" max="48" />
-              <div class="hint">-1 = none</div></div>
-          </div>
-          <div class="hint">Wi-Fi, hostname and pin changes restart the bridge.</div>
-        </section>
-
-        <Firmware status={status} />
-
-        <div class="actions card">
-          <button type="submit">Save</button>
-          <button type="button" class="sec" onClick={reboot}>Restart</button>
-          <button type="button" class="danger" onClick={reset}>
-            {resetArmed ? 'Click again to erase all settings' : 'Factory reset'}
-          </button>
-          <span id="msg" style={{ color: msg.bad ? 'var(--bad)' : 'var(--ok)' }}>{msg.text}</span>
+      <div class="sec-row">
+        <h2 class="sec-h">Scenes</h2>
+        <span class="sp" />
+        <label class="fade">Fade
+          <input type="number" min="0" max="60" step="0.1" value={fade}
+                 onChange={e => setFade(e.currentTarget.value)} /> s</label>
+      </div>
+      {scenes && scenes.scenes.length > 0 ? (
+        <div class="tiles scenes">
+          {scenes.scenes.map(sc => {
+            const on = sc.id === scenes.active;
+            return (
+              <button key={sc.id} type="button"
+                      class={'tile scene' + (on ? ' on' : '') + (on && scenes.fading ? ' fading' : '')}
+                      aria-pressed={on} title={`recall scene ${sc.id}`} onClick={() => recall(sc.id)}>
+                <span class="tl">{sc.name}</span>
+                <span class="ts">{on ? (scenes.fading ? 'Fading…' : 'Active') : ''}</span>
+              </button>
+            );
+          })}
         </div>
-      </form>
+      ) : scenes && (
+        <p class="empty">No scenes yet. Set the faders in the <a href="/console">Console</a> and press
+          <b> + Save</b> on its scene bar.</p>
+      )}
+
+      <div class="status-wrap">
+        <Status status={status} offline={statusOffline} names={names} />
+      </div>
     </main>
   );
 }

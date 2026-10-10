@@ -15,6 +15,7 @@
 #include "esp_timer.h"
 #include "names.h"
 #include "scenes.h"
+#include "script.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "wifi_mgr.h"
@@ -312,6 +313,58 @@ static int cmd_hide(int argc, char **argv)
     return 0;
 }
 
+/* ---- script list|run|stop|log|param ---- */
+
+static int cmd_script(int argc, char **argv)
+{
+    const char *sub = argc > 1 ? argv[1] : "list";
+    if (strcmp(sub, "list") == 0) {
+        cJSON *st = script_status_json();
+        const cJSON *run = cJSON_GetObjectItemCaseSensitive(st, "running");
+        const cJSON *it;
+        cJSON_ArrayForEach(it, cJSON_GetObjectItemCaseSensitive(st, "scripts")) {
+            const char *n = cJSON_GetObjectItemCaseSensitive(it, "name")->valuestring;
+            printf("%c %-24s %6d bytes\n", cJSON_IsString(run) && strcmp(run->valuestring, n) == 0 ? '*' : ' ',
+                   n, cJSON_GetObjectItemCaseSensitive(it, "size")->valueint);
+        }
+        cJSON_ArrayForEach(it, cJSON_GetObjectItemCaseSensitive(st, "params")) {
+            printf("  param %-15s %g\n", cJSON_GetObjectItemCaseSensitive(it, "name")->valuestring,
+                   cJSON_GetObjectItemCaseSensitive(it, "value")->valuedouble);
+        }
+        const cJSON *f = cJSON_GetObjectItemCaseSensitive(st, "failed");
+        if (f) {
+            printf("failed: %s: %s\n", cJSON_GetObjectItemCaseSensitive(f, "name")->valuestring,
+                   cJSON_GetObjectItemCaseSensitive(f, "error")->valuestring);
+        }
+        cJSON_Delete(st);
+        return 0;
+    }
+    if (strcmp(sub, "run") == 0 && argc == 3) {
+        const char *err = script_run(argv[2]);
+        printf("%s\n", err ? err : "OK");
+        return err ? 1 : 0;
+    }
+    if (strcmp(sub, "stop") == 0) {
+        script_stop();
+        printf("OK\n");
+        return 0;
+    }
+    if (strcmp(sub, "log") == 0) {
+        char *text = NULL;
+        script_log_read(0, &text);
+        printf("%s", text ? text : "");
+        free(text);
+        return 0;
+    }
+    if (strcmp(sub, "param") == 0 && argc == 4) {
+        const char *err = script_set_param(argv[2], strtod(argv[3], NULL));
+        printf("%s\n", err ? err : "OK");
+        return err ? 1 : 0;
+    }
+    printf("Usage: script [list] | run <name> | stop | log | param <name> <value>\n");
+    return 1;
+}
+
 /* ---- scene list|save|recall|rename|delete ---- */
 
 static int cmd_scene(int argc, char **argv)
@@ -443,6 +496,8 @@ esp_err_t cli_start(void)
         { .command = "hide", .help = "Hide a channel on the web console: hide <1-512>", .func = cmd_hide },
         { .command = "unhide", .help = "Show a hidden channel again: unhide <1-512|all>", .func = cmd_hide },
         { .command = "scene", .help = "Console scenes: scene list|save|recall|rename|delete", .func = cmd_scene },
+        { .command = "script", .help = "Effect scripts: script [list] | run <name> | stop | log | param <name> <v>",
+          .func = cmd_script },
         { .command = "log", .help = "Set log level: log <none|error|warn|info|debug> [tag]", .func = cmd_log },
         { .command = "reboot", .help = "Restart the bridge", .func = cmd_reboot },
         { .command = "factory_reset", .help = "Erase all settings: factory_reset yes", .func = cmd_factory_reset },

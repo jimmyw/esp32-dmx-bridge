@@ -42,7 +42,9 @@ static const char *TAG = "assets";
     extern const char sym##_end[] asm("_binary_" #sym "_end");
 
 ASSET(index_html_gz)
+ASSET(settings_html_gz)
 ASSET(console_html_gz)
+ASSET(scripts_html_gz)
 ASSET(manifest_json)
 
 typedef struct {
@@ -54,7 +56,9 @@ typedef struct {
 
 static const asset_t s_assets[] = {
     { "/",        "index.html.gz",   index_html_gz_start,   index_html_gz_end },
+    { "/settings", "settings.html.gz", settings_html_gz_start, settings_html_gz_end },
     { "/console", "console.html.gz", console_html_gz_start, console_html_gz_end },
+    { "/scripts", "scripts.html.gz", scripts_html_gz_start, scripts_html_gz_end },
 };
 
 static bool s_mounted;

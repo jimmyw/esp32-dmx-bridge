@@ -14,7 +14,7 @@ function sourceText(d) {
     (d.sources > 1 ? ` (+${d.sources - 1})` : '');
 }
 
-// Polls /api/status every second and hands it to `onStatus` (the page title uses it too).
+// Polls /api/status every second: [status, offline]. Shared by the start and settings pages.
 export function useStatus() {
   const [status, setStatus] = useState(null);
   const [offline, setOffline] = useState(false);

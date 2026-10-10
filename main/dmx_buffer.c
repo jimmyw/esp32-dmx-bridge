@@ -24,6 +24,8 @@ static uint8_t s_output[DMX_SLOTS];   // network layer (kept for "hold last look
 static uint8_t s_final[DMX_SLOTS];    // network merged with the manual layer
 static uint8_t s_manual[DMX_SLOTS];
 static uint8_t s_manual_master = 255;
+static uint8_t s_script[DMX_SLOTS];
+static bool    s_script_owned[DMX_SLOTS];
 static dmx_stats_t s_stats;
 
 void dmx_buffer_init(void)
@@ -144,7 +146,8 @@ void dmx_buffer_get_output(uint8_t out[DMX_SLOTS])
     s_stats.signal = best != NULL;
     for (int i = 0; i < DMX_SLOTS; i++) {
         uint8_t m = (uint8_t)((s_manual[i] * s_manual_master + 127) / 255);
-        s_final[i] = m > s_output[i] ? m : s_output[i];
+        uint8_t below = s_script_owned[i] ? s_script[i] : s_output[i];
+        s_final[i] = m > below ? m : below;
     }
     memcpy(out, s_final, DMX_SLOTS);
     xSemaphoreGive(s_lock);
@@ -196,5 +199,24 @@ void dmx_buffer_get_manual(uint8_t out[DMX_SLOTS], uint8_t *master)
     xSemaphoreTake(s_lock, portMAX_DELAY);
     memcpy(out, s_manual, DMX_SLOTS);
     *master = s_manual_master;
+    xSemaphoreGive(s_lock);
+}
+
+void dmx_buffer_set_script(const uint8_t *values, const bool *owned)
+{
+    xSemaphoreTake(s_lock, portMAX_DELAY);
+    if (owned) {
+        memcpy(s_script, values, DMX_SLOTS);
+        memcpy(s_script_owned, owned, sizeof(s_script_owned));
+    } else {
+        memset(s_script_owned, 0, sizeof(s_script_owned));
+    }
+    xSemaphoreGive(s_lock);
+}
+
+void dmx_buffer_get_input(uint8_t out[DMX_SLOTS])
+{
+    xSemaphoreTake(s_lock, portMAX_DELAY);
+    memcpy(out, s_output, DMX_SLOTS);
     xSemaphoreGive(s_lock);
 }

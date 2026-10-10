@@ -11,7 +11,7 @@ const MiniCssExtractPlugin = require('mini-css-extract-plugin');
 const CssMinimizerPlugin = require('css-minimizer-webpack-plugin');
 const CompressionPlugin = require('compression-webpack-plugin');
 
-const PAGES = ['index', 'console'];
+const PAGES = ['index', 'settings', 'console', 'scripts'];
 
 // Replace <script src>/<link href> tags with the file contents, then drop those files.
 class InlineAssetsPlugin {
