@@ -19,7 +19,7 @@ export function ScriptBar() {
   const toggle = async name => {
     try { setSt(await (st.running === name ? stopScript() : runScript(name))); } catch (e) {}
   };
-  const scripts = [...st.scripts].sort((a, b) => a.name.localeCompare(b.name));
+  const scripts = st.scripts.filter(s => !s.lib).sort((a, b) => a.name.localeCompare(b.name));   // not setup.js
 
   return (
     <div id="fxbar">

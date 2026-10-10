@@ -1,14 +1,7 @@
 // Colour chase: every head steps through the colour wheel, one colour apart, while the LED
 // ring follows. Heads hold still where the pan/tilt faders put them (console or QLC+).
-// Mini moving heads in 12-channel mode at addresses 1, 13, 25 and 37.
-
-var LAYOUT = { color: 5, gobo: 6, strobe: 7, dim: 8, mode: 10, strip: 12 };
-var heads = [1, 13, 25, 37].map(function (a) { return fixture(a, LAYOUT); });
-
-// Colour wheel (ch 5: 0-139) and LED ring (ch 12: 5-109, seven colours). Tune these to the
-// positions of your fixture.
-var WHEEL = [0, 20, 40, 60, 80, 100, 120];
-var RING  = [10, 25, 40, 55, 70, 85, 100];
+// Lights, channels and colour positions: setup.js.
+include('setup');
 
 var pos = 0;
 

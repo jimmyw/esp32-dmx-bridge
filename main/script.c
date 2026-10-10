@@ -26,6 +26,7 @@ static const char *TAG = "script";
 #define BASE             "/scripts"
 #define LABEL            "scripts"
 #define MAX_PARAMS       16
+#define MAX_INCLUDES     8
 #define PARAM_NAME_MAX   15
 #define LOG_SIZE         4096
 #define TASK_STACK       24576
@@ -45,11 +46,16 @@ EXAMPLE(script_prelude_js)
 EXAMPLE(fan_circle_js)
 EXAMPLE(color_chase_js)
 EXAMPLE(figure_eight_js)
-#define EXAMPLE_ENTRY(n, sym) { n, sym##_start, sym##_end }
-static const struct { const char *name; const char *start, *end; } s_examples[] = {
-    EXAMPLE_ENTRY("fan-circle", fan_circle_js),
-    EXAMPLE_ENTRY("color-chase", color_chase_js),
-    EXAMPLE_ENTRY("figure-eight", figure_eight_js),
+EXAMPLE(setup_js)
+// since: the seed version that added the file. A bridge seeded before gets just the newer files,
+// once, so a file the user deleted or changed stays that way.
+#define SEED_VERSION 2
+#define EXAMPLE_ENTRY(n, sym, v) { n, sym##_start, sym##_end, v }
+static const struct { const char *name; const char *start, *end; uint8_t since; } s_examples[] = {
+    EXAMPLE_ENTRY("fan-circle", fan_circle_js, 1),
+    EXAMPLE_ENTRY("color-chase", color_chase_js, 1),
+    EXAMPLE_ENTRY("figure-eight", figure_eight_js, 1),
+    EXAMPLE_ENTRY("setup", setup_js, 2),
 };
 
 typedef struct {
@@ -82,6 +88,8 @@ static duk_context  *s_ctx;
 static cJSON        *s_saved;               // saved param values of the running script
 static uint8_t       s_values[DMX_SLOTS], s_input[DMX_SLOTS], s_fader[DMX_SLOTS];
 static bool          s_owned[DMX_SLOTS];
+static char          s_included[MAX_INCLUDES][SCRIPT_NAME_MAX + 1];   // include()d by the running script
+static int           s_nincluded;
 static int64_t       s_start_us, s_last_us;
 static volatile int64_t s_deadline_us;      // exec timeout, 0 = none
 static const char   *s_deadline_what;       // "frame()" or "top-level code"
@@ -223,6 +231,11 @@ bool script_name_valid(const char *name)
         }
     }
     return true;
+}
+
+bool script_is_lib(const char *name)
+{
+    return strcmp(name, "setup") == 0 || name[0] == '_';
 }
 
 static void path_of(char *buf, size_t size, const char *name, const char *ext)
@@ -518,7 +531,46 @@ static duk_ret_t js_param(duk_context *ctx)
     return 1;
 }
 
+static bool included(const char *name)
+{
+    for (int i = 0; i < s_nincluded; i++) {
+        if (strcmp(s_included[i], name) == 0) return true;
+    }
+    return false;
+}
+
+// include(name): run <name>.js in the global scope, once per script start (later calls, and
+// include cycles, do nothing). For shared setup such as fixture types and the rig.
+static duk_ret_t js_include(duk_context *ctx)
+{
+    const char *name = duk_require_string(ctx, 0);
+    if (!script_name_valid(name)) {
+        return duk_range_error(ctx, "include: bad script name '%s'", name);
+    }
+    if (included(name)) {
+        return 0;
+    }
+    if (s_nincluded >= MAX_INCLUDES) {
+        return duk_range_error(ctx, "include: too many files (max %d)", MAX_INCLUDES);
+    }
+    size_t len;
+    char *src = script_read(name, &len);
+    if (!src) {
+        return duk_error(ctx, DUK_ERR_REFERENCE_ERROR, "include: no script '%s'", name);
+    }
+    strlcpy(s_included[s_nincluded++], name, sizeof(s_included[0]));
+    duk_push_string(ctx, name);
+    // Copy into the heap first, so the malloc'd buffer is freed even if compiling throws.
+    duk_push_lstring(ctx, src, len);
+    free(src);
+    duk_swap(ctx, -1, -2);   // [source filename]
+    duk_compile(ctx, 0);     // throws SyntaxError (reported with the include's name and line)
+    duk_call(ctx, 0);
+    return 0;
+}
+
 static const duk_function_list_entry s_natives[] = {
+    { "include", js_include, 1 },
     { "set", js_set, 2 },
     { "setFine", js_set_fine, 3 },
     { "get", js_get, 1 },
@@ -538,24 +590,35 @@ static void fail(const char *name)
     s_deadline_us = 0;
     char msg[sizeof(s_error)];
     int line = 0;
+    char file[SCRIPT_NAME_MAX + 1] = "";
     if (duk_is_error(s_ctx, -1)) {
-        // The innermost frame in the script itself ("at frame (fan-circle:12)"): errors thrown
-        // by natives or prelude helpers otherwise point into C code or the prelude.
+        // The innermost frame in the script or a file it included ("at frame (fan-circle:12)"):
+        // errors thrown by natives or prelude helpers otherwise point into C code or the prelude.
         duk_get_prop_string(s_ctx, -1, "stack");
-        const char *stack = duk_get_string_default(s_ctx, -1, "");
-        char key[SCRIPT_NAME_MAX + 4];
-        snprintf(key, sizeof(key), "(%s:", name);
-        const char *at = strstr(stack, key);
-        if (at) {
-            line = atoi(at + strlen(key));
+        const char *p = duk_get_string_default(s_ctx, -1, "");
+        while (!line && (p = strchr(p, '('))) {
+            const char *colon = strchr(++p, ':');
+            size_t n = colon ? (size_t)(colon - p) : 0;
+            if (n && n <= SCRIPT_NAME_MAX) {
+                char f[SCRIPT_NAME_MAX + 1];
+                memcpy(f, p, n);
+                f[n] = '\0';
+                if (strcmp(f, name) == 0 || included(f)) {
+                    line = atoi(colon + 1);
+                    strcpy(file, f);
+                }
+            }
         }
         duk_pop(s_ctx);
-        if (!at) {   // syntax errors carry no stack frame of the script yet
+        if (!line) {   // syntax errors carry no stack frame of their file yet
             duk_get_prop_string(s_ctx, -1, "fileName");
-            bool ours = strcmp(duk_get_string_default(s_ctx, -1, ""), name) == 0;
-            duk_pop(s_ctx);
-            duk_get_prop_string(s_ctx, -1, "lineNumber");
-            line = ours ? duk_get_int_default(s_ctx, -1, 0) : 0;
+            const char *f = duk_get_string_default(s_ctx, -1, "");
+            if (strcmp(f, name) == 0 || included(f)) {
+                strlcpy(file, f, sizeof(file));
+                duk_get_prop_string(s_ctx, -2, "lineNumber");
+                line = duk_get_int_default(s_ctx, -1, 0);
+                duk_pop(s_ctx);
+            }
             duk_pop(s_ctx);
         }
     }
@@ -568,12 +631,17 @@ static void fail(const char *name)
         e = timeout;
     }
     if (line > 0) {
-        // SyntaxErrors already end in " (line N)"
+        // SyntaxErrors already end in " (line N)" or " (line N, end of input)"
         char suffix[24];
-        int sn = snprintf(suffix, sizeof(suffix), " (line %d)", line);
+        snprintf(suffix, sizeof(suffix), " (line %d", line);
+        const char *sfx = strstr(e, suffix);
         size_t n = strlen(e);
-        int keep = (n >= (size_t)sn && strcmp(e + n - sn, suffix) == 0) ? (int)(n - sn) : (int)n;
-        snprintf(msg, sizeof(msg), "line %d: %.*s", line, keep, e);
+        int keep = (sfx && n > 0 && e[n - 1] == ')' && !strchr(sfx + 2, '(')) ? (int)(sfx - e) : (int)n;
+        if (strcmp(file, name) == 0) {
+            snprintf(msg, sizeof(msg), "line %d: %.*s", line, keep, e);
+        } else {   // in an included file: "setup.js line 7: ..."
+            snprintf(msg, sizeof(msg), "%s.js line %d: %.*s", file, line, keep, e);
+        }
     } else {
         snprintf(msg, sizeof(msg), "%s", e);
     }
@@ -633,6 +701,7 @@ static void engine_start(const char *name, bool guarded)
     }
     memset(s_values, 0, sizeof(s_values));
     memset(s_owned, 0, sizeof(s_owned));
+    s_nincluded = 0;
     s_saved = params_load(name);
     xSemaphoreTake(s_lock, portMAX_DELAY);
     strlcpy(s_running, name, sizeof(s_running));
@@ -719,9 +788,19 @@ static void engine_task(void *arg)
         while (xQueueReceive(s_queue, &c, wait) == pdTRUE) {
             wait = 0;
             // Saving the running script, or the one that just failed, (re)starts it.
+            // ... and so does saving a file the running script include()d.
             bool reload = c.op == CMD_RELOAD &&
                           (strcmp(c.name, s_running) == 0 || strcmp(c.name, s_error_name) == 0);
-            if (c.op == CMD_RUN || reload) {
+            char restart[SCRIPT_NAME_MAX + 1] = "";
+            if (c.op == CMD_RELOAD && s_ctx && included(c.name)) {
+                strlcpy(restart, s_running, sizeof(restart));
+            } else if (c.op == CMD_RELOAD && !s_ctx && s_error_name[0] && included(c.name)) {
+                // the list is still that of the script that failed: fixing its setup.js retries it
+                strlcpy(restart, s_error_name, sizeof(restart));
+            }
+            if (restart[0]) {
+                engine_start(restart, false);
+            } else if (c.op == CMD_RUN || reload) {
                 engine_start(c.name, c.done == NULL && c.op == CMD_RUN);   // only autorun doesn't wait
             } else if (c.op == CMD_STOP) {
                 engine_stop();
@@ -784,6 +863,7 @@ const char *script_run(const char *name)
 {
     if (!s_mounted) return "no scripts partition";
     if (!script_name_valid(name) || !exists(name)) return "no such script";
+    if (script_is_lib(name)) return "a shared file for include(), not an effect";
     send_cmd(CMD_RUN, name, true);
     autorun_set(name);
     return NULL;
@@ -874,6 +954,9 @@ cJSON *script_status_json(void)
             cJSON *o = cJSON_CreateObject();
             cJSON_AddStringToObject(o, "name", name);
             cJSON_AddNumberToObject(o, "size", stat(path, &st) == 0 ? st.st_size : 0);
+            if (script_is_lib(name)) {
+                cJSON_AddBoolToObject(o, "lib", true);
+            }
             cJSON_AddItemToArray(arr, o);
         }
         closedir(d);
@@ -899,16 +982,21 @@ static void seed_examples(void)
         return;
     }
     nvs_get_u8(h, "seeded", &seeded);
-    if (!seeded) {
+    if (seeded < SEED_VERSION) {
+        int n = 0;
         for (size_t i = 0; i < sizeof(s_examples) / sizeof(s_examples[0]); i++) {
+            if (s_examples[i].since <= seeded || exists(s_examples[i].name)) {
+                continue;
+            }
             char path[48];
             path_of(path, sizeof(path), s_examples[i].name, ".js");
             // TEXT embeds carry a trailing NUL
             write_file(path, BASE "/upload.tmp", s_examples[i].start, s_examples[i].end - s_examples[i].start - 1);
+            n++;
         }
-        nvs_set_u8(h, "seeded", 1);
+        nvs_set_u8(h, "seeded", SEED_VERSION);
         nvs_commit(h);
-        ESP_LOGI(TAG, "wrote %u example scripts", (unsigned)(sizeof(s_examples) / sizeof(s_examples[0])));
+        ESP_LOGI(TAG, "wrote %d example scripts", n);
     }
     nvs_close(h);
 }

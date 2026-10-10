@@ -9,6 +9,7 @@ main.wide h1 button{font-size:14px;font-weight:400;padding:7px 12px}
 .list .item.sel{border-color:var(--acc);background:var(--bg)}
 .list .item .nm{flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .mod{color:var(--acc)}
+.list h2.sub{margin:12px 0 4px}
 .upl{display:inline-block;padding:9px 14px;border:1px solid var(--line);border-radius:6px;cursor:pointer;
   color:var(--fg);font-size:15px;margin:0}
 .bar{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:8px}

@@ -11,14 +11,43 @@ come with the firmware; a fresh bridge gets a copy of each.
 ## How a script runs
 
 ```js
-var head = fixture(1, { pan: [1, 2], tilt: [3, 4], dim: 8 });   // runs once, on start
+include('setup');                            // the lights: heads, TYPES, ready() from setup.js
+var phase = 0;                               // top-level code runs once, on start
 
-function frame(t, dt) {                                          // runs every DMX frame (40/s)
-  var speed = param('speed', 0.2, 0, 1);                         // a live slider
-  head.dim = 255;
-  head.pan = 127.5 + 60 * Math.sin(2 * Math.PI * speed * t);
+function frame(t, dt) {                      // runs every DMX frame (40/s)
+  phase += param('speed', 0.2, 0, 1) * dt;   // a live slider
+  ready();
+  heads.forEach(function (h, i) {
+    h.dim = 255;
+    h.pan = 127.5 + 60 * Math.sin(2 * Math.PI * (phase + i / heads.length));
+  });
 }
 ```
+
+## The light setup: `setup.js`
+
+The lights are described once, in `setup.js`, and every effect loads it with
+`include('setup')`:
+
+* `TYPES`: one channel layout per kind of light, mapping property names to channels within the
+  fixture. It has the mini moving head in 12- and 10-channel mode and the 13-channel head.
+* `heads`: the rig, one `fixture(address, TYPES.…)` per light.
+* `ready()`: puts every head under DMX control (no built-in program, no strobe, fastest
+  pan/tilt).
+* `WHEEL` / `RING`: colour positions for the colour effects.
+
+Change a channel, readdress a light or add a new type there, and every effect follows. Saving
+`setup.js` restarts the running effect with it. Use the same property names across types (`pan`,
+`tilt`, `dim`, `color`, …) and an effect drives any mix of lights. Setting a property a type
+doesn't have does nothing.
+
+Files named `setup` or starting with `_` (say `_colors.js`) are **shared files**: the editor lists
+them under *Shared*, they don't appear as effects on the start page or in the FX bar, and they
+can't be run on their own. An error inside one is reported as `setup.js line 7: …`, and clicking
+it opens that file at that line.
+
+A bridge that already had scripts before this change gets `setup.js` once, on the first boot of the
+new firmware; your existing files are not touched.
 
 * Top-level code runs once when the script starts. Then `frame(t, dt)` runs at the DMX refresh rate:
   `t` is seconds since the start, `dt` seconds since the previous frame.
@@ -46,6 +75,7 @@ function frame(t, dt) {                                          // runs every D
 | `release(ch)` / `release()` | Hand one channel, or all of them, back to the network input. |
 | `param(name, def, [min], [max], [step])` | Declare a live parameter and return its current value. The first call creates a slider on the scripts page and in the console FX bar; call it inside `frame()` to follow changes. Values are saved per script (`<name>.json`) and come back on the next start. Defaults: `min` 0, `max` `max(1, 2 × def)`, `step` continuous. At most 16 per script; names up to 15 characters. |
 | `print(...)` | Write a line to the log on the scripts page (and the serial console). |
+| `include(name)` | Run `<name>.js` first, in the same global scope, once per start; repeated and circular includes do nothing. Up to 8 files. |
 
 From the prelude (`main/script_prelude.js`):
 
@@ -65,9 +95,8 @@ All of `Math`, `JSON`, `Date` and so on are there too.
   steppy.
 * **Speed changes without jumps:** integrate the phase, `phase += speed * dt`, instead of computing
   `speed * t`. Otherwise every change of `speed` makes the heads jump.
-* **Fixture layout:** the examples use the mini moving heads' 12-channel mode (pan, pan fine,
-  tilt, tilt fine, colour, gobo, strobe, dimmer, speed, auto mode, -, LED ring) at addresses 1, 13,
-  25 and 37. Change `LAYOUT` and the address list at the top for other fixtures.
+* **Fixture layout:** the examples drive `heads` from `setup.js`: four mini moving heads in
+  12-channel mode at addresses 1, 13, 25 and 37. Change the rig there.
 
 ## Files and API
 

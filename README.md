@@ -204,7 +204,7 @@ error line jump), Run/Stop, the script's live parameter sliders and its log. The
 button shows a bar to start and stop scripts and adjust their parameters.
 
 ```js
-var heads = [1, 13, 25, 37].map(function (a) { return fixture(a, { pan: [1, 2], tilt: [3, 4], dim: 8 }); });
+include('setup');                                     // heads = the rig, from setup.js
 var phase = 0;
 function frame(t, dt) {
   phase += param('speed', 0.15, 0, 1) * dt;           // live slider
@@ -217,8 +217,10 @@ function frame(t, dt) {
 }
 ```
 
-Channels a script sets replace the network input; all others still follow QLC+. Examples and the
-full API are in [`scripts/`](scripts/README.md).
+Channels a script sets replace the network input; all others still follow QLC+. The lights are
+described once, in a shared `scripts/setup.js` (fixture types, the rig and `ready()`), which
+effects load with `include('setup')`. Examples and the full API are in
+[`scripts/`](scripts/README.md).
 
 ## Web UI
 

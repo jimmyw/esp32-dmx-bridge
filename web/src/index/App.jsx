@@ -63,7 +63,7 @@ export function App() {
     } catch (e) { setMsg('connection failed'); }
   };
 
-  const scripts = st ? [...st.scripts].sort((a, b) => a.name.localeCompare(b.name)) : [];
+  const scripts = st ? st.scripts.filter(s => !s.lib).sort((a, b) => a.name.localeCompare(b.name)) : [];   // not setup.js
   const running = st && st.running;
   const failed = st && st.failed;
   const setupMode = status && !status.wifi.sta && status.wifi.ap;

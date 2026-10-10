@@ -7,18 +7,26 @@ import { Editor } from './Editor';
 import { Help } from './Help';
 
 const TEMPLATE = `// New effect. frame(t, dt) runs every DMX frame; t and dt are in seconds.
+include('setup');   // the lights (heads, TYPES, ready()): setup.js
 
-var head = fixture(1, { pan: [1, 2], tilt: [3, 4], dim: 8 });
+var phase = 0;
 
 function frame(t, dt) {
   var speed = param('speed', 0.2, 0, 1);   // a live slider, 0..1
-  head.dim = 255;
-  head.pan = 127 + 60 * Math.sin(2 * Math.PI * speed * t);
+  phase += speed * dt;
+  ready();
+  heads.forEach(function (h, i) {
+    h.dim = 255;
+    h.pan = 127.5 + 60 * Math.sin(2 * Math.PI * (phase + i / heads.length));
+  });
 }
 `;
 
-// "line 12: ..." -> 12
-const errorLine = msg => { const m = /^line (\d+):/.exec(msg || ''); return m ? +m[1] : 0; };
+// "line 12: ..." -> {file: script, line: 12}; "setup.js line 7: ..." -> {file: 'setup', line: 7}
+function errorAt(failed) {
+  const m = /^(?:([\w-]+)\.js )?line (\d+):/.exec(failed.error || '');
+  return m ? { file: m[1] || failed.name, line: +m[2] } : null;
+}
 
 export function App() {
   const [st, setSt] = useState(null);
@@ -32,6 +40,7 @@ export function App() {
   const [jump, setJump] = useState(null);
   const [delArmed, tapDel, disarmDel] = useConfirm(4000);
   const drafts = useRef({});                      // unsaved edits per script, kept while switching
+  const pendingJump = useRef(null);               // {file, line} to select once `file` has loaded
   const logEnd = useRef(-1);
   const logBox = useRef();
 
@@ -54,7 +63,7 @@ export function App() {
 
   // Pick the first script once the list is known.
   useEffect(() => {
-    if (st && !sel && !isNew && st.scripts.length) setSel([...st.scripts].sort(byName)[0].name);
+    if (st && !sel && !isNew && st.scripts.length) setSel([...st.scripts].sort((a, b) => (!!a.lib - !!b.lib) || byName(a, b))[0].name);
   }, [st, sel, isNew]);
 
   useEffect(() => {
@@ -65,6 +74,8 @@ export function App() {
       if (gone) return;
       setSaved(text);
       setSrc(drafts.current[sel] ?? text);
+      const pj = pendingJump.current;
+      if (pj && pj.file === sel) { pendingJump.current = null; setJump({ line: pj.line, n: Date.now() }); }
     }).catch(() => { if (!gone) { setSaved(''); setSrc(''); say(`Could not load ${sel}`, true); } });
     history.replaceState(null, '', `?name=${encodeURIComponent(sel)}`);
     return () => { gone = true; };
@@ -168,8 +179,28 @@ export function App() {
 
   const running = st && st.running;
   const selRunning = !isNew && running === sel;
-  const failed = st && st.failed && st.failed.name === (isNew ? '' : sel) ? st.failed : null;
-  const scripts = st ? [...st.scripts].sort(byName) : [];
+  // An error shows with its own script, and with the shared file it points into.
+  const failedAt = st && st.failed ? errorAt(st.failed) : null;
+  const failed = st && st.failed && !isNew && (st.failed.name === sel || (failedAt && failedAt.file === sel))
+    ? st.failed : null;
+  const all = st ? [...st.scripts].sort(byName) : [];
+  const scripts = all.filter(s => !s.lib), libs = all.filter(s => s.lib);
+  const selLib = !isNew && libs.some(s => s.name === sel);
+  const gotoError = () => {
+    if (!failedAt) return;
+    if (failedAt.file === sel) setJump({ line: failedAt.line, n: Date.now() });
+    else { pendingJump.current = failedAt; pick(failedAt.file); }
+  };
+  const item = s => (
+    <button key={s.name} type="button"
+            class={'item' + (s.name === sel && !isNew ? ' sel' : '')}
+            onClick={() => pick(s.name)}>
+      <span class={'dot' + (s.name === running ? ' on' : '')}
+            title={s.name === running ? 'running' : ''} />
+      <span class="nm">{s.name}</span>
+      {drafts.current[s.name] !== undefined && <span class="mod" title="unsaved changes">●</span>}
+    </button>
+  );
 
   return (
     <main class="wide">
@@ -182,17 +213,10 @@ export function App() {
       <div class="layout">
         <section class="card list">
           <h2>Scripts</h2>
-          {scripts.map(s => (
-            <button key={s.name} type="button"
-                    class={'item' + (s.name === sel && !isNew ? ' sel' : '')}
-                    onClick={() => pick(s.name)}>
-              <span class={'dot' + (s.name === running ? ' on' : '')}
-                    title={s.name === running ? 'running' : ''} />
-              <span class="nm">{s.name}</span>
-              {drafts.current[s.name] !== undefined && <span class="mod" title="unsaved changes">●</span>}
-            </button>
-          ))}
+          {scripts.map(item)}
           {isNew && <div class="item sel"><span class="dot" /><span class="nm">new script</span></div>}
+          {libs.length > 0 && <h2 class="sub" title="files effects load with include()">Shared</h2>}
+          {libs.map(item)}
           <div class="actions" style={{ marginTop: '8px' }}>
             <button type="button" class="sec" onClick={startNew}>+ New</button>
             <label class="sec upl" title="upload a .js file from this computer">Upload
@@ -214,8 +238,10 @@ export function App() {
             <span class="sp" />
             <button type="button" class="sec" disabled={!dirty || (!sel && !isNew)} onClick={save}
                     title="Ctrl+S">Save</button>
-            <button type="button" disabled={!sel && !isNew} onClick={run}
-                    title={dirty ? 'save, then run' : 'run'}>{selRunning ? 'Restart' : 'Run'}</button>
+            {!selLib && (
+              <button type="button" disabled={!sel && !isNew} onClick={run}
+                      title={dirty ? 'save, then run' : 'run'}>{selRunning ? 'Restart' : 'Run'}</button>
+            )}
             <button type="button" class="sec" disabled={!running} onClick={stop}
                     title={running ? `stop ${running}` : 'nothing running'}>Stop</button>
             <button type="button" class="sec" disabled={!sel && !isNew} onClick={download}>Download</button>
@@ -224,9 +250,8 @@ export function App() {
             )}
           </div>
           {failed && (
-            <button type="button" class="err" title="go to the line"
-                    onClick={() => errorLine(failed.error) && setJump({ line: errorLine(failed.error), n: Date.now() })}>
-              {failed.error}
+            <button type="button" class="err" title="go to the line" onClick={gotoError}>
+              {failed.name !== sel && `${failed.name}: `}{failed.error}
             </button>
           )}
           <Editor value={src} onInput={edit} onSave={save} jump={jump} />

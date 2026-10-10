@@ -18,6 +18,7 @@
 esp_err_t script_init(void);   // mount, seed the examples on a fresh partition, autorun
 
 bool  script_name_valid(const char *name);
+bool  script_is_lib(const char *name);   // "setup" or "_*": shared files for include(), not effects
 char *script_read(const char *name, size_t *len);                    // malloc'd, NULL if missing
 const char *script_write(const char *name, const char *src, size_t len);   // NULL or error;
                                        // (re)starts it if it is running or just failed
@@ -28,7 +29,7 @@ const char *script_set_param(const char *name, double value);
 
 // {"running":"fan-circle"|null,"failed":{"name":..,"error":"line 3: .."},
 //  "params":[{name,value,min,max,step}],"log_end":..,"heap_used":..,"heap_limit":..,
-//  "scripts":[{"name":..,"size":..}],"fs_total":..,"fs_used":..}
+//  "scripts":[{"name":..,"size":..,"lib":true}],"fs_total":..,"fs_used":..}
 cJSON *script_status_json(void);
 
 // Log text (print() output and errors) written after byte offset `since`. Returns the new end
