@@ -33,7 +33,7 @@ export function ParamSlider({ p }) {
 
   return (
     <label class="param" title={`${p.name}: ${p.min} – ${p.max}`}>
-      <span class="pn">{p.name}</span>
+      <span class="pn">{p.label || p.name}</span>
       <input type="range" min={p.min} max={p.max} step={step} value={v}
              onPointerDown={() => { dragging.current = true; }}
              onInput={e => { const x = +e.currentTarget.value; setV(x); send(x); }}

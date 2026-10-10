@@ -10,6 +10,7 @@ const API = [
   ['release(ch) / release()', 'Hand one channel / all channels back to the network input.'],
   ['param(name, def, [min], [max], [step])', 'Declare a live slider (shown here and in the console FX bar) and return its value. Call it in frame() to follow changes. Values are saved per script.'],
   ['print(...)', 'Write a line to the log below.'],
+  ['effect(name)', "Load another effect as a child, with its own variables and sliders (named \"<name>.<param>\"). Returns { name, frame(t, dt) }; call frame() to run it. cycle.js uses it to play effects in turn – and a cycle can play other cycles."],
   ['include(name)', "Run another file first, once – include('setup') loads setup.js with the fixture types (TYPES), the rig (heads) and ready(). Change lights there, once, for all effects. Files named setup or starting with _ are shared files: they don't show as effects, and saving one restarts the effect that uses it."],
   ['fixture(address, layout)', 'Object whose properties write channels: fixture(13, { pan: [1, 2], dim: 8 }) – head.pan = 127.5 sets 13+14 (16-bit), head.dim = 255 sets 20.'],
   ['sine(x) tri(x) saw(x) square(x)', 'Waves 0..1 over a phase in cycles (1 = one period).'],

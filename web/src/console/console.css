@@ -81,7 +81,8 @@ button:disabled{opacity:.5;cursor:default}
 #fx button{flex:0 0 auto;max-width:160px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 #fx button.active{background:var(--acc);color:#000;border-color:var(--acc)}
 .fxerr{color:var(--bad);font-size:12px;font-family:ui-monospace,monospace;overflow-wrap:anywhere}
-#fxparams{display:grid;grid-template-columns:repeat(auto-fill,minmax(210px,1fr));gap:4px 14px}
+#fxparams .params{display:grid;grid-template-columns:repeat(auto-fill,minmax(210px,1fr));gap:4px 14px}
+#fxparams .more{font-size:12px;color:var(--mut)}
 .param{display:flex;align-items:center;gap:8px;font-size:12px;min-width:0}
 .param .pn{color:var(--mut);width:64px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .param input{flex:1;min-width:0;accent-color:var(--acc)}

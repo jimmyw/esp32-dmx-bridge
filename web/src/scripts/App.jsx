@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'preact/hooks';
 import { getJson } from '../common/api';
 import { useConfirm, useEvent, useInterval } from '../common/hooks';
-import { ParamSlider } from '../common/ParamSlider';
+import { ParamList } from '../common/ParamList';
 import { deleteScript, loadSource, runScript, saveSource, stopScript, validName } from '../common/scripts';
 import { Editor } from './Editor';
 import { Help } from './Help';
@@ -267,9 +267,7 @@ export function App() {
       {running && st.params.length > 0 && (
         <section class="card">
           <h2>Parameters – {running}</h2>
-          <div class="params">
-            {st.params.map(p => <ParamSlider key={running + '/' + p.name} p={p} />)}
-          </div>
+          <ParamList params={st.params} running={running} />
         </section>
       )}
 

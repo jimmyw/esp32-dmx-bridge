@@ -25,9 +25,9 @@ static const char *TAG = "script";
 
 #define BASE             "/scripts"
 #define LABEL            "scripts"
-#define MAX_PARAMS       16
-#define MAX_INCLUDES     8
-#define PARAM_NAME_MAX   15
+#define MAX_PARAMS       32
+#define MAX_INCLUDES     16                  // include()d files and effect() children
+#define PARAM_NAME_MAX   39                  // room for "cycle.fan-circle.speed"
 #define LOG_SIZE         4096
 #define TASK_STACK       24576
 #define STACK_RESERVE    4096                 // native stack check: throw below this much headroom
@@ -47,15 +47,17 @@ EXAMPLE(fan_circle_js)
 EXAMPLE(color_chase_js)
 EXAMPLE(figure_eight_js)
 EXAMPLE(setup_js)
+EXAMPLE(cycle_js)
 // since: the seed version that added the file. A bridge seeded before gets just the newer files,
 // once, so a file the user deleted or changed stays that way.
-#define SEED_VERSION 2
+#define SEED_VERSION 3
 #define EXAMPLE_ENTRY(n, sym, v) { n, sym##_start, sym##_end, v }
 static const struct { const char *name; const char *start, *end; uint8_t since; } s_examples[] = {
     EXAMPLE_ENTRY("fan-circle", fan_circle_js, 1),
     EXAMPLE_ENTRY("color-chase", color_chase_js, 1),
     EXAMPLE_ENTRY("figure-eight", figure_eight_js, 1),
     EXAMPLE_ENTRY("setup", setup_js, 2),
+    EXAMPLE_ENTRY("cycle", cycle_js, 3),
 };
 
 typedef struct {
@@ -371,11 +373,15 @@ static cJSON *params_load(const char *name)
     if (!f) {
         return NULL;
     }
-    char buf[1024];
-    size_t n = fread(buf, 1, sizeof(buf) - 1, f);
+    char *buf = malloc(4096);
+    size_t n = buf ? fread(buf, 1, 4095, f) : 0;
     fclose(f);
+    if (!buf) {
+        return NULL;
+    }
     buf[n] = '\0';
     cJSON *o = cJSON_Parse(buf);
+    free(buf);
     if (!cJSON_IsObject(o)) {
         cJSON_Delete(o);
         return NULL;
@@ -569,8 +575,38 @@ static duk_ret_t js_include(duk_context *ctx)
     return 0;
 }
 
+// __load(name): <name>.js compiled as a function of `param`, with its own scope: calling it runs
+// the script's top level and returns {frame}. The prelude's effect() wraps it.
+static duk_ret_t js_load(duk_context *ctx)
+{
+    const char *name = duk_require_string(ctx, 0);
+    if (!script_name_valid(name)) {
+        return duk_range_error(ctx, "effect: bad script name '%s'", name);
+    }
+    size_t len;
+    char *src = script_read(name, &len);
+    if (!src) {
+        return duk_error(ctx, DUK_ERR_REFERENCE_ERROR, "effect: no script '%s'", name);
+    }
+    if (!included(name) && s_nincluded < MAX_INCLUDES) {
+        strlcpy(s_included[s_nincluded++], name, sizeof(s_included[0]));   // errors + reload on save
+    }
+    // The header shares line 1 with the script, so line numbers stay the file's own. `var frame`
+    // keeps a script without one from picking up the caller's global frame().
+    duk_push_string(ctx, "(function (param) { var frame; ");
+    duk_push_lstring(ctx, src, len);
+    free(src);
+    duk_push_string(ctx, "\n;return { frame: frame };\n})");
+    duk_concat(ctx, 3);
+    duk_push_string(ctx, name);
+    duk_compile(ctx, DUK_COMPILE_EVAL);
+    duk_call(ctx, 0);   // evaluates to the function
+    return 1;
+}
+
 static const duk_function_list_entry s_natives[] = {
     { "include", js_include, 1 },
+    { "__load", js_load, 1 },
     { "set", js_set, 2 },
     { "setFine", js_set_fine, 3 },
     { "get", js_get, 1 },

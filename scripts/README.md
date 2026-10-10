@@ -59,9 +59,33 @@ new firmware; your existing files are not touched.
 * Errors stop the script. The message, with its line number, shows on the scripts page, in the
   console's FX bar and in the log.
 * Limits: top-level code may run 3 s and each `frame()` call 1 s; past that the script is stopped
-  as an endless loop. The script gets a 768 KB heap (PSRAM), and scripts can be up to 32 KB each.
+  as an endless loop. Up to 32 sliders per script (children's included). The script gets a 768 KB heap (PSRAM), and scripts can be up to 32 KB each.
 * Duktape implements **ES5.1**: use `var` and `function`. Arrow functions, `let`/`class` and
   template strings don't parse.
+
+## Playing effects in turn: `cycle.js`
+
+`cycle.js` plays other effects one after another, each for `seconds` (a slider, default 20), then
+the next:
+
+```js
+var effects = [effect('fan-circle'), effect('figure-eight'), effect('color-chase')];
+```
+
+Each effect in the list runs as a **child**, loaded with `effect(name)`:
+
+* **Own scope:** it keeps its own variables, so its motion picks up where it left off on its next
+  turn.
+* **Own sliders:** it keeps its sliders, named `<effect>.<param>` (`fan-circle.speed`). They are
+  saved with the cycle and grouped per effect on the start page and the scripts page; the
+  console's FX bar shows just the cycle's own.
+* **Nesting:** a child can be a cycle itself, e.g. `[effect('cycle'), effect('color-chase')]` plays the whole
+  cycle, then the colour chase.
+* **Changes:** saving a child restarts the cycle with it, and an error in a child reads
+  `fan-circle.js line 12: …`.
+
+Channels an effect set keep their last value when the next one takes over, so a colour chase after
+a circle holds the heads where the circle left them.
 
 ## API
 
@@ -75,6 +99,7 @@ new firmware; your existing files are not touched.
 | `release(ch)` / `release()` | Hand one channel, or all of them, back to the network input. |
 | `param(name, def, [min], [max], [step])` | Declare a live parameter and return its current value. The first call creates a slider on the scripts page and in the console FX bar; call it inside `frame()` to follow changes. Values are saved per script (`<name>.json`) and come back on the next start. Defaults: `min` 0, `max` `max(1, 2 × def)`, `step` continuous. At most 16 per script; names up to 15 characters. |
 | `print(...)` | Write a line to the log on the scripts page (and the serial console). |
+| `effect(name)` | Load another effect as a child: its own variables, and sliders named `<name>.<param>`. Returns `{ name, frame(t, dt) }`; call `frame()` to run it. A script can't load itself. |
 | `include(name)` | Run `<name>.js` first, in the same global scope, once per start; repeated and circular includes do nothing. Up to 8 files. |
 
 From the prelude (`main/script_prelude.js`):

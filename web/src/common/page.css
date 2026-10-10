@@ -34,3 +34,5 @@ button:disabled{opacity:.45;cursor:default}
 .param .pn{width:80px;color:var(--mut);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .param input{flex:1;padding:0;accent-color:var(--acc);min-height:28px}
 .param .pv{width:44px;text-align:right;font-variant-numeric:tabular-nums}
+.param-group + .param-group{margin-top:12px}
+h3.pg{font-size:12px;font-weight:600;color:var(--mut);margin:0 0 4px;text-transform:uppercase;letter-spacing:.04em}

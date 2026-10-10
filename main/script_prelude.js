@@ -47,3 +47,25 @@ function fixture(address, layout) {
   });
   return f;
 }
+
+/*
+ * effect(name): load another effect script as a child, with its own variables and its own live
+ * parameters (shown as "<name>.<param>"). Returns { name, frame(t, dt) }: the caller runs it by
+ * calling frame(), e.g. a cycle that plays effects in turn. Children may load children too.
+ */
+var __loading = {};
+function effect(name) {
+  if (__loading[name]) throw new Error('effect: ' + name + ' loads itself');
+  __loading[name] = true;
+  var e;
+  try {
+    e = __load(name)(function (n, d, min, max, step) {
+      return param(name + '.' + n, d, min, max, step);
+    });
+  } finally {
+    delete __loading[name];
+  }
+  if (typeof e.frame !== 'function') throw new TypeError('effect: ' + name + ' has no frame(t, dt) function');
+  e.name = name;
+  return e;
+}

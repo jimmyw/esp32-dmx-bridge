@@ -2,7 +2,7 @@ import { useEffect, useState } from 'preact/hooks';
 import { getJson, postJson } from '../common/api';
 import { useInterval } from '../common/hooks';
 import { usePersisted } from '../common/persisted';
-import { ParamSlider } from '../common/ParamSlider';
+import { ParamList, label } from '../common/ParamList';
 import { runScript, stopScript } from '../common/scripts';
 import { Status, useStatus } from '../common/Status';
 
@@ -12,8 +12,6 @@ import { Status, useStatus } from '../common/Status';
  * time). Settings moved to /settings.
  */
 
-// "fan-circle" -> "Fan circle"
-const label = n => { const s = n.replace(/[-_]+/g, ' ').trim(); return s.charAt(0).toUpperCase() + s.slice(1); };
 
 export function App() {
   const [st, setSt] = useState(null);
@@ -119,9 +117,7 @@ export function App() {
                     onClick={() => act(running, stopScript)}>Stop</button>
           </div>
           {st.params.length > 0 ? (
-            <div class="params">
-              {st.params.map(p => <ParamSlider key={running + '/' + p.name} p={p} />)}
-            </div>
+            <ParamList params={st.params} running={running} />
           ) : <p class="hint">This script has no parameters.</p>}
         </section>
       )}

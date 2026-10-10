@@ -7,6 +7,7 @@ idf_component_register(
                   esp_driver_uart esp_driver_gpio esp_app_format app_update console lwip esp_timer esp_partition spiffs duktape
     EMBED_TXTFILES "script_prelude.js" "../scripts/fan-circle.js" "../scripts/color-chase.js"
                    "../scripts/figure-eight.js" "../scripts/setup.js"
+                   "../scripts/cycle.js"
 )
 
 # Web UI: webpack bundles web/src into one self-contained, gzipped HTML file per page

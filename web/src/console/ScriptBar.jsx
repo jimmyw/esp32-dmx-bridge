@@ -1,6 +1,6 @@
 import { useCallback, useState } from 'preact/hooks';
 import { getJson } from '../common/api';
-import { ParamSlider } from '../common/ParamSlider';
+import { ParamList } from '../common/ParamList';
 import { runScript, stopScript } from '../common/scripts';
 import { useLiveEvents } from './live';
 
@@ -38,7 +38,10 @@ export function ScriptBar() {
       {st.failed && <div class="fxerr">{st.failed.name}: {st.failed.error}</div>}
       {st.running && st.params.length > 0 && (
         <div id="fxparams">
-          {st.params.map(p => <ParamSlider key={st.running + '/' + p.name} p={p} />)}
+          <ParamList params={st.params} running={st.running} ownOnly />
+          {st.params.some(p => p.name.includes('.')) && (
+            <a class="more" href="/">more sliders (its effects) on the start page</a>
+          )}
         </div>
       )}
     </div>

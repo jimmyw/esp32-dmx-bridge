@@ -219,7 +219,8 @@ function frame(t, dt) {
 
 Channels a script sets replace the network input; all others still follow QLC+. The lights are
 described once, in a shared `scripts/setup.js` (fixture types, the rig and `ready()`), which
-effects load with `include('setup')`. Examples and the full API are in
+effects load with `include('setup')`. `scripts/cycle.js` plays a list of effects in turn, each for
+a set time (and can play other cycles). Examples and the full API are in
 [`scripts/`](scripts/README.md).
 
 ## Web UI
