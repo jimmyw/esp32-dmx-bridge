@@ -77,7 +77,7 @@ static void set_defaults(void)
     g_config.mic_sck          = CONFIG_DMX_MIC_SCK_PIN;
     g_config.mic_ws           = CONFIG_DMX_MIC_WS_PIN;
     g_config.mic_sd           = CONFIG_DMX_MIC_SD_PIN;
-    g_config.mic_gate         = 75;
+    g_config.mic_gate         = 62;
     g_config.beat_sens        = 14;
     g_config.fallback_bpm     = 120;
 }
@@ -96,10 +96,11 @@ static void sanitize(void)
     if (!config_pin_valid(g_config.mic_sck, true)) g_config.mic_sck = -1;
     if (!config_pin_valid(g_config.mic_ws, true))  g_config.mic_ws = -1;
     if (!config_pin_valid(g_config.mic_sd, true))  g_config.mic_sd = -1;
-    if (g_config.mic_gate < 20 || g_config.mic_gate > 100) g_config.mic_gate = 75;
+    if (g_config.mic_gate < 20 || g_config.mic_gate > 100) g_config.mic_gate = 62;
     if (g_config.beat_sens < 10 || g_config.beat_sens > 40) g_config.beat_sens = 14;
     if (g_config.beat_offset_ms < -300 || g_config.beat_offset_ms > 300) g_config.beat_offset_ms = 0;
-    if (g_config.fallback_bpm != 0 && (g_config.fallback_bpm < 60 || g_config.fallback_bpm > 200)) g_config.fallback_bpm = 120;
+    if (g_config.fallback_bpm > 180) g_config.fallback_bpm = 180;   // the tempo range the tracker follows
+    if (g_config.fallback_bpm != 0 && g_config.fallback_bpm < 60) g_config.fallback_bpm = 60;
     if (g_config.hostname[0] == '\0') {
         snprintf(g_config.hostname, sizeof(g_config.hostname), "%s-%s",
                  CONFIG_DMX_HOSTNAME_PREFIX, s_mac_suffix);
@@ -271,7 +272,7 @@ const char *config_set_field(bridge_config_t *c, const char *key, const char *va
         if (!parse_int(value, 10, 40, &v)) return "beat sensitivity must be 10-40";
         c->beat_sens = v;
     } else if (strcmp(key, "fallback_bpm") == 0) {
-        if (!parse_int(value, 0, 200, &v) || (v != 0 && v < 60)) return "fallback tempo must be 60-200 BPM, or 0 = off";
+        if (!parse_int(value, 0, 180, &v) || (v != 0 && v < 60)) return "fallback tempo must be 60-180 BPM, or 0 = off";
         c->fallback_bpm = v;
     } else if (strcmp(key, "beat_offset_ms") == 0) {
         if (!parse_int(value, -300, 300, &v)) return "beat offset must be -300..300 ms";

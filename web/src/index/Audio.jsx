@@ -13,7 +13,7 @@ const BANDS = 16, SPECTRUM = 32;
 function parse(d) {
   if (d[0] !== 2 || d.length < 12 + BANDS + SPECTRUM) return null;
   return {
-    mic: !!(d[1] & 1), demo: !!(d[1] & 2), signal: !!(d[1] & 4), locked: !!(d[1] & 8), forced: !!(d[1] & 16),
+    mic: !!(d[1] & 1), signal: !!(d[1] & 4), locked: !!(d[1] & 8),
     level: d[2] / 255, bass: d[3] / 255, mid: d[4] / 255, high: d[5] / 255,
     beats: d[6] | (d[7] << 8), bpm: (d[8] | (d[9] << 8)) / 10, phase: d[10] / 255, db: d[11] - 100,
     bands: d.slice(12, 12 + BANDS), spectrum: d.slice(12 + BANDS, 12 + BANDS + SPECTRUM),
@@ -140,36 +140,30 @@ function ConfigSlider({ name, label, min, max, step, fmt, reset, title, config, 
              onInput={e => setV(+e.currentTarget.value)} onChange={e => save(+e.currentTarget.value)} />
       <span class="ov">{text}</span>
       <span class="hint">{msg || hint}</span>
-      {v !== reset && <button type="button" class="sec small" onClick={() => { setV(reset); save(reset); }}>{reset}</button>}
+      {/* always rendered, so its slot doesn't come and go while dragging */}
+      <button type="button" class="sec small reset" style={{ visibility: v !== reset ? 'visible' : 'hidden' }}
+              title={`back to ${reset}`} onClick={() => { setV(reset); save(reset); }}>{reset}</button>
     </label>
   );
 }
 
 // Offset: shifts the whole beat grid, so lights that react late can be pulled onto the music.
 const offsetFmt = v => [`${v > 0 ? '+' : ''}${v} ms`, v > 0 ? 'beats earlier' : v < 0 ? 'beats later' : 'no shift'];
-// Demo tempo: the demo track's tempo, which also plays by itself when the microphone hears nothing
-// (and keeps the beat when it hears sound without one). Left end = off: silence stays silent.
-const demoFmt = v => (v < 60 ? ['off', 'silence stays silent'] : [`${v} BPM`, 'when nothing is heard']);
+// Fallback tempo: effect scripts get a timed beat at this tempo when the microphone gives none.
+// Left end = off: then scripts get no beat without music.
+const fallbackFmt = v => (v < 60 ? ['off', 'no beat without music'] : [`${v} BPM`, 'scripts, without a beat']);
 
 export function Audio() {
   const frame = useAudioFrames();
   const [info, setInfo] = useState(null);   // /api/audio: mic_data (is the mic sending?)
   const [config, setConfig] = useState(null);
   useEffect(() => { getJson('/api/config').then(setConfig).catch(() => {}); }, []);
-  const [busy, setBusy] = useState(false);
   useInterval(async () => { try { setInfo(await getJson('/api/audio')); } catch (e) {} }, 3000);
 
-  const f = frame || { mic: false, demo: false, forced: false, signal: false, level: 0, bass: 0, mid: 0, high: 0, bpm: 0, phase: 0, db: -100 };
-  const demo = async on => {
-    setBusy(true);
-    try { setInfo(await postJson('/api/audio', { demo: on })); } catch (e) {}
-    setBusy(false);
-  };
+  const f = frame || { mic: false, signal: false, level: 0, bass: 0, mid: 0, high: 0, bpm: 0, phase: 0, db: -100 };
 
   let state;
-  if (f.forced) state = 'Demo track';
-  else if (f.demo) state = f.mic ? 'Demo track – the microphone hears nothing' : 'Demo track – no microphone';
-  else if (!f.mic) state = 'No microphone – set its pins in Settings';
+  if (!f.mic) state = 'No microphone – set its pins in Settings';
   else if (info && !info.mic_data) state = 'Microphone sends no data – check the wiring';
   else if (!f.signal) state = `Quiet (${f.db.toFixed(0)} dBFS, below the noise gate)`;
   else state = `Listening · ${f.db.toFixed(0)} dBFS`;
@@ -179,10 +173,6 @@ export function Audio() {
       <div class="ph">
         <h2>Sound</h2>
         <span class="hint astate">{state}</span>
-        <span class="sp" />
-        <button type="button" class={'sec small' + (f.forced ? ' on' : '')} disabled={busy}
-                title="play the demo track instead of the microphone, at the demo tempo"
-                onClick={() => demo(!f.forced)}>{f.forced ? 'Stop demo' : 'Demo'}</button>
       </div>
       <Spectrum frame={frame} />
       <div class="audio-row">
@@ -192,17 +182,21 @@ export function Audio() {
           <Meter name="Mid" v={f.mid} />
           <Meter name="High" v={f.high} />
         </div>
-        <div class="tempo" title="tempo from the beats; the ring fills once per beat">
+        <div class="tempo" title="tempo from a steady kick; the ring fills once per beat. Without a kick: no beat, flashes on the notes">
           <PhaseRing phase={f.phase} on={f.bpm > 0} />
           <span class="bpm">{f.bpm > 0 ? Math.round(f.bpm) : '–'}
-            <small>{f.demo ? 'BPM demo' : f.bpm > 0 && !f.locked ? 'BPM (no beat)' : 'BPM'}</small></span>
+            <small>{f.bpm > 0 ? 'BPM' : f.signal ? 'no beat' : 'BPM'}</small></span>
         </div>
       </div>
+      <ConfigSlider name="mic_gate" label="Gate" min={-90} max={-30} step={1} reset={-62}
+                    fmt={v => [`${v} dBFS`, `now ${f.db.toFixed(0)} dBFS${f.signal ? '' : ' (below)'}`]}
+                    config={config} fromCfg={c => -c} toCfg={x => -x}
+                    title="sound quieter than this counts as silence: set it above the room's noise and below the music" />
       <ConfigSlider name="beat_offset_ms" label="Offset" min={-300} max={300} step={5} reset={0} fmt={offsetFmt}
                     config={config} title="move the beat earlier (+) to make up for lights that react late, or later (-)" />
-      <ConfigSlider name="fallback_bpm" label="Demo" min={55} max={200} step={1} reset={120} fmt={demoFmt}
+      <ConfigSlider name="fallback_bpm" label="Fallback" min={55} max={180} step={1} reset={120} fmt={fallbackFmt}
                     config={config} fromCfg={c => (c ? c : 55)} toCfg={x => (x < 60 ? 0 : x)}
-                    title="the demo track's tempo; it plays by itself when the microphone hears nothing (left end = off)" />
+                    title="effect scripts get a timed beat at this tempo when the microphone gives no beat (left end = off)" />
     </section>
   );
 }

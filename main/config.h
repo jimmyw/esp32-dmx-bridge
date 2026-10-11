@@ -39,8 +39,8 @@ typedef struct {
     // v3:
     int16_t  beat_offset_ms;     // shifts the beat grid: > 0 = beats come earlier (fixture delay)
     // v4:
-    uint8_t  fallback_bpm;       // demo tempo (60-200): the demo plays when nothing is heard,
-                                 // 0 = it doesn't (the Demo button still plays it, at 120)
+    uint8_t  fallback_bpm;       // scripts' timed beat (60-180) when the microphone gives no
+                                 // tempo, 0 = none
 } bridge_config_t;
 
 // Global, live configuration. Readers may access fields directly; writers use config_save().

@@ -20,6 +20,10 @@ static int s_pin = -1;
 static volatile int64_t s_test_until_us;
 static volatile uint8_t s_test[3];
 static bool s_err_logged;
+// Cost, per STATS_N updates (~10 s): CPU time of one update (avg, max) and how late it woke.
+#define STATS_N 500
+static int32_t s_busy_sum, s_busy_max, s_late_max, s_n;
+static volatile int32_t s_stat_avg, s_stat_max, s_stat_late;
 
 static void beat_led_task(void *arg)
 {
@@ -27,6 +31,8 @@ static void beat_led_task(void *arg)
     uint8_t last[3] = { 1, 1, 1 };
     while (1) {
         xTaskDelayUntil(&wake, pdMS_TO_TICKS(UPDATE_MS));
+        int64_t t0 = esp_timer_get_time();
+        int32_t late = (int32_t)((xTaskGetTickCount() - wake) * portTICK_PERIOD_MS * 1000);
         audio_state_t a;
         audio_get(&a);
         int64_t now = esp_timer_get_time();
@@ -35,26 +41,16 @@ static void beat_led_task(void *arg)
             r = s_test[0] / MAX_LEVEL;
             g = s_test[1] / MAX_LEVEL;
             b = s_test[2] / MAX_LEVEL;
-        } else if (a.period_s > 0 || a.signal || a.demo) {
+        } else if (a.period_s > 0 || a.signal) {
             float flash;
             if (a.period_s > 0) {
-                // Brightest right on the beat, gone before the next one. Green: locked to the
-                // sound; amber: running on the demo tempo (sound without a beat).
+                // Brightest right on the beat, gone before the next one. Green: locked to the beat.
                 float p = audio_phase_at(&a, now);
                 flash = powf(1 - p, 4);
-                if (a.locked) {
-                    g = flash;
-                } else {
-                    r = flash;
-                    g = 0.45f * flash;
-                }
+                g = flash;
             } else {
                 flash = a.last_beat_us ? expf(-(now - a.last_beat_us) / 80000.0f) : 0;
                 b = flash;
-            }
-            if (a.demo) {
-                r += 0.25f * flash + 0.04f;
-                b += 0.25f * flash + 0.04f;
             }
         }
         uint8_t px[3] = {
@@ -71,7 +67,24 @@ static void beat_led_task(void *arg)
             last[1] = px[1];
             last[2] = px[2];
         }
+        int32_t busy = (int32_t)(esp_timer_get_time() - t0);
+        s_busy_sum += busy;
+        if (busy > s_busy_max) s_busy_max = busy;
+        if (late > s_late_max) s_late_max = late;
+        if (++s_n >= STATS_N) {
+            s_stat_avg = s_busy_sum / s_n;
+            s_stat_max = s_busy_max;
+            s_stat_late = s_late_max;
+            s_busy_sum = s_busy_max = s_late_max = s_n = 0;
+        }
     }
+}
+
+void beat_led_stats(int *avg_us, int *max_us, int *late_us)
+{
+    *avg_us = s_stat_avg;
+    *max_us = s_stat_max;
+    *late_us = s_stat_late;
 }
 
 esp_err_t beat_led_test(uint8_t r, uint8_t g, uint8_t b, uint32_t ms)
@@ -127,5 +140,7 @@ esp_err_t beat_led_start(void)
     led_strip_clear(s_led);
     s_pin = pin;
     ESP_LOGI(TAG, "beat LED on GPIO %d", pin);
-    return xTaskCreatePinnedToCore(beat_led_task, "beat_led", 3072, NULL, 2, NULL, 0) == pdPASS ? ESP_OK : ESP_ERR_NO_MEM;
+    // Above the web server and the scripts: a late update shows as a stutter. An update takes
+    // ~0.4 ms, nearly all of it asleep while the RMT sends the pixel and the 280 us reset.
+    return xTaskCreatePinnedToCore(beat_led_task, "beat_led", 3072, NULL, 10, NULL, 0) == pdPASS ? ESP_OK : ESP_ERR_NO_MEM;
 }

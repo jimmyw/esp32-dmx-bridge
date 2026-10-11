@@ -58,8 +58,15 @@ main.board{max-width:960px}
 .ring .rfg{stroke:var(--acc);stroke-linecap:round}
 .bpm{font-size:26px;font-weight:700;font-variant-numeric:tabular-nums;display:flex;flex-direction:column;line-height:1;min-width:52px}
 .bpm small{font-size:11px;font-weight:400;color:var(--mut);margin-top:3px}
-.cslider{display:flex;align-items:center;gap:10px;margin:10px 0 0;font-size:13px;color:var(--fg);flex-wrap:wrap}
-.cslider .mn{width:58px;color:var(--mut)}
-.cslider input{flex:1;min-width:140px;padding:0;accent-color:var(--acc)}
-.cslider .ov{width:64px;text-align:right;font-variant-numeric:tabular-nums}
-.cslider .hint{margin:0;min-width:80px}
+.cslider{display:grid;grid-template-columns:58px minmax(120px,1fr) 76px 190px 52px;align-items:center;gap:10px;
+  margin:10px 0 0;font-size:13px;color:var(--fg)}
+.cslider .mn{color:var(--mut)}
+.cslider input{width:100%;padding:0;margin:0;accent-color:var(--acc)}
+.cslider .ov{text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap}
+.cslider .hint{margin:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font-variant-numeric:tabular-nums}
+.cslider .reset{width:52px;padding:4px 0}
+@media (max-width:640px){
+  .cslider{grid-template-columns:52px minmax(0,1fr) 72px 48px;grid-template-areas:"mn in ov rs" ". hn hn hn";row-gap:2px}
+  .cslider .mn{grid-area:mn}.cslider input{grid-area:in}.cslider .ov{grid-area:ov}
+  .cslider .hint{grid-area:hn}.cslider .reset{grid-area:rs;width:48px}
+}

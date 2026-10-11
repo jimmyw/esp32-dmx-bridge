@@ -103,7 +103,8 @@ void app_main(void)
     ESP_ERROR_CHECK(artnet_start());
     ESP_ERROR_CHECK(sacn_start());
     assets_init();   // web pages partition; built-in pages are used without it
-    audio_start();   // microphone analysis (also without one: demo mode)
+    audio_start();   // microphone analysis
+    audio_rec_start();   // raw microphone stream on TCP 7001, for tuning the analysis
     beat_led_start();   // board RGB LED flashes on the beat
     script_init();   // effect scripts; restarts the one that was running
     ESP_ERROR_CHECK(web_start());

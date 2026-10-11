@@ -5,9 +5,9 @@
 #include "config.h"
 #include "driver/gpio.h"
 #include "driver/i2s_std.h"
+#include "esp_attr.h"
 #include "esp_heap_caps.h"
 #include "esp_log.h"
-#include "esp_random.h"
 #include "esp_timer.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
@@ -27,6 +27,38 @@ static const char *TAG = "audio";
 #define ONSET_BINS  12                   // onsets: bins up to ~260 Hz (kick, bass) at full weight,
 #define ONSET_HI    186                  //   up to ~4 kHz (snare, claps) at ONSET_HI_W each
 #define ONSET_HI_W  0.06f
+#ifndef COMB_POW
+#define COMB_POW    2                    // the beats' place: hits weighted by their square
+#endif
+#define UPPER_TOP   372                  // the upper curve (snare, claps, hats, notes): ~260 Hz - 8 kHz
+#ifndef UPPER_CONF
+#define UPPER_CONF  0.55f                // ... gives a tempo without a kick when this regular
+#endif
+#define SMOOTH_PASSES 1                  // 1-2-1 smoothing of the onset curve before the tempo
+#define SWITCH_MARGIN 1.25f              // a rival tempo must fit this much better than the current
+#define CAND_N 20                        // tempo updates (~5/s) a different tempo must hold to win
+#ifndef FOLLOW_WIN
+#define FOLLOW_WIN  0.06f                // estimates this close to the tempo pull it along...
+#endif
+#ifndef LOCAL_MIN
+#define LOCAL_MIN   0.5f                 // our own peak keeps being followed while this strong
+#endif
+#ifndef FOLLOW_RATE
+#define FOLLOW_RATE 0.8f                 // ... this much per update (~5/s)
+#endif
+#define KICK_LO     2                    // the kick: bins ~43-150 Hz
+#define KICK_HI     7
+#ifndef KICK_SHARE
+#define KICK_SHARE  0.5f                 // ... and has this share of the frame's rise in energy
+#endif
+#ifndef KICK_FIT
+#define KICK_FIT    0.4f                 // the kicks' self-match at the tempo (or every other beat)
+#endif
+#define KICK_HOLD_US     4000000         // keep a tempo this long without a steady kick
+#ifndef KICK_WIN_US
+#define KICK_WIN_US      3000000         // a steady kick: 4 in this long
+#endif
+#define SILENCE_DROP_US  5000000         // ... but drop it after this much silence
 #define FLUX_REL    2.0f                 // an onset also needs flux > FLUX_REL * the mean
 #define PRIOR_OCT   0.9f                 // tempo prior: spread around 120 BPM, in octaves
 #define PHASE_STEP  0.04f                // largest phase correction per tempo update (~5/s)
@@ -35,12 +67,13 @@ static const char *TAG = "audio";
 #define ONSET_MIN   2.0f                 // flux an onset needs at least (sum of log rises)
 #define BPM_MIN     70
 #define BPM_MAX     180
+#define FOLLOW_MIN  60                   // a tempo is followed a bit past the range, then folds
+#define FOLLOW_MAX  200
 
 typedef struct { int lo, hi; } range_t;  // FFT bins [lo, hi)
 
 static portMUX_TYPE s_mux = portMUX_INITIALIZER_UNLOCKED;
 static audio_state_t s_state;            // published (guarded by s_mux)
-static volatile bool s_demo;
 static i2s_chan_handle_t s_rx;
 
 // Analysis (audio task only)
@@ -50,18 +83,34 @@ static range_t s_band_bins[AUDIO_BANDS], s_spec_bins[AUDIO_SPECTRUM];
 static range_t s_bass_bins, s_mid_bins, s_high_bins;
 static float s_peak[4 + AUDIO_BANDS];    // AGC peaks: level, bass, mid, high, bands...
 static float s_spec_peak;
-static float s_prev_log[ONSET_HI + 1];
+static float s_prev_log[UPPER_TOP + 1];
+static float s_prev_kick[KICK_HI + 1];
 static int64_t s_onset_times[4];         // the last 4 onsets: a tempo needs them recent
 static float s_flux_mean, s_flux_var, s_flux_prev;
-static int64_t s_last_onset_us, s_tempo_seen_us;
+static int64_t s_last_onset_us, s_signal_seen_us;
 static float s_onsets[ONSET_N];          // onset curve (ring, newest at s_onset_pos - 1): tempo
 static float s_onsets_low[ONSET_N];      // the same from the low end only: where the beats fall
+static float s_onsets_up[ONSET_N];       // the same from above the bass: snares, hats, notes
+static bool  s_upper;                    // the tempo comes from the upper curve (no kick)
 static int   s_onset_pos, s_tempo_tick;
+static float s_kicks[ONSET_N];           // the same from the kick range, frames that are mostly bass
+static int64_t s_kick_times[4];          // the last 4 kicks
+static int64_t s_last_kick_us, s_kick_seen_us;
+static float s_kick_mean, s_kick_prev, s_prev_e_kick, s_prev_e_all;
 static float s_cand;                     // tempo candidate that differs from the current one
 static int   s_cand_n;
 static int64_t s_last_mic_activity_us;
-static int64_t s_mic_loud_us;            // the microphone last heard something above the gate
-#define AUTO_DEMO_US 3000000             // silence before the demo track takes over
+static bool    s_gate_open;              // the last analysis was above the gate
+static float   s_open_ratio;             // share of recent analyses above the gate (~1.5 s)
+#define OPEN_MIN    0.9f                 // a tempo needs sound this steadily: not noise at the gate
+#define GATE_HYST   0.708f               // the gate closes 3 dB below where it opens
+static volatile audio_tap_t s_tap;
+static double  s_clock_us;               // when the newest sample of a block was heard, from the sample count
+static int64_t s_diag_start_us;          // diagnostics, per DIAG_US window: the longest analysis
+static int32_t s_proc_max_us, s_late_max_us, s_proc_last_us, s_late_last_us;   //   and the task's lag
+static int64_t s_proc_sum_us;
+static int32_t s_proc_n, s_proc_avg_us;
+#define DIAG_US 10000000
 static int s_channel = -1;               // the slot the mic talks on: 0 left, 1 right, -1 not yet
 static int32_t s_raw_min[2], s_raw_max[2];   // last block, per slot (diagnostics)
 
@@ -96,7 +145,8 @@ static void log_bins(range_t *out, int n)
     }
 }
 
-static void fft(float *re, float *im)
+// The hot path (each block, each tempo update) runs from IRAM: no stalls on flash cache misses.
+static IRAM_ATTR void fft(float *re, float *im)
 {
     for (int i = 1, j = 0; i < N; i++) {
         int bit = N >> 1;
@@ -121,7 +171,7 @@ static void fft(float *re, float *im)
     }
 }
 
-static float rms_bins(range_t r)
+static IRAM_ATTR float rms_bins(range_t r)
 {
     float sum = 0;
     for (int b = r.lo; b < r.hi; b++) sum += s_mag[b] * s_mag[b];
@@ -145,49 +195,27 @@ static float release(float prev, float v)
     return fmaxf(v, prev * RELEASE);
 }
 
-/* ---------- demo track: kick, off-beat hi-hat, a slow pad ---------- */
-
-static uint32_t s_demo_n;   // sample counter
-static double   s_demo_pos; // beats played (the tempo can change while it runs)
-
-// The demo's tempo: the slider (config fallback_bpm), or 120 when that's off.
-static float demo_bpm(void)
-{
-    return g_config.fallback_bpm ? g_config.fallback_bpm : 120;
-}
-
-// Levels like music at the microphone (kick peaks ~-30 dBFS, hi-hat ~-45, pad ~-55), so the auto
-// gain doesn't have to settle when the input switches between the two.
-
-static void demo_fill(float *out)
-{
-    float bpm = demo_bpm(), beat_s = 60 / bpm;
-    for (int i = 0; i < HOP; i++, s_demo_n++) {
-        float t = (float)s_demo_n / RATE;
-        s_demo_pos += bpm / 60.0 / RATE;
-        float tb = (float)(s_demo_pos - floor(s_demo_pos)) * beat_s;               // since the beat
-        float th = (float)(s_demo_pos + 0.5 - floor(s_demo_pos + 0.5)) * beat_s;   // since the off-beat
-        // kick: pitch sweeping 120 -> 50 Hz, ~80 ms decay
-        float kick = 0.03f * expf(-tb / 0.08f) * sinf(2 * (float)M_PI * (50 * tb + 70 * 0.03f * (1 - expf(-tb / 0.03f))));
-        float noise = (float)(esp_random() & 0xFFFF) / 32768.0f - 1;
-        float hat = 0.006f * expf(-th / 0.02f) * noise;
-        float swell = 0.5f + 0.5f * sinf(2 * (float)M_PI * t / 8);   // 8 s swell
-        float pad = 0.0015f * (0.4f + 0.6f * swell) * (sinf(2 * (float)M_PI * 220 * t) + sinf(2 * (float)M_PI * 277.2f * t) +
-                                     sinf(2 * (float)M_PI * 329.6f * t));
-        out[i] = kick + hat + pad;
-    }
-}
-
 /* ---------- tempo ---------- */
 
 static float s_music_bpm;                // tempo found in the music, 0 = none
+static float s_last_est;                 // the last tempo estimate (overall best peak)
 
-// The grid's tempo: the music's when there is one, else the fallback (config fallback_bpm, 0 =
-// none: then beats are the raw onsets). The phase carries on across a switch.
+// The grid's tempo: the music's when there is one; else none, and the beats are
+// the onsets as they come.
 static void set_tempo(audio_state_t *a)
 {
+    // A tempo followed past the range (a build-up speeding up) folds by an octave, the grid
+    // staying on the beats: past BPM_MAX every other beat is kept, below BPM_MIN each is split.
+    if (s_music_bpm > BPM_MAX) {
+        s_music_bpm /= 2;
+        a->phase = (a->phase + (a->beats & 1)) / 2;
+    } else if (s_music_bpm > 0 && s_music_bpm < BPM_MIN) {
+        s_music_bpm *= 2;
+        a->phase *= 2;
+        if (a->phase >= 1) { a->phase -= 1; a->beats++; }
+    }
     a->locked = s_music_bpm > 0;
-    a->bpm = a->locked ? s_music_bpm : g_config.fallback_bpm;
+    a->bpm = s_music_bpm;
     a->period_s = a->bpm > 0 ? 60 / a->bpm : 0;
 }
 
@@ -201,7 +229,7 @@ static void grid_advance(audio_state_t *a, float dt, int64_t now)
     a->phase = p - floorf(p);
 }
 
-// No input at all (no microphone, no demo; the fallback is off): everything at rest.
+// No microphone: everything at rest.
 static void idle_tick(int64_t now)
 {
     portENTER_CRITICAL(&s_mux);
@@ -210,7 +238,6 @@ static void idle_tick(int64_t now)
     float dt = a.t_us ? (now - a.t_us) / 1e6f : 0;
     a.t_us = now;
     a.signal = false;
-    a.demo = false;
     s_music_bpm = 0;
     set_tempo(&a);
     a.level = a.bass = a.mid = a.high = 0;
@@ -224,41 +251,124 @@ static void idle_tick(int64_t now)
 
 // Autocorrelation of the onset curve over BPM_MIN..BPM_MAX, weighted by a log-normal prior
 // around 120 BPM. Returns BPM (parabolic interpolation between lags) and *conf = r(lag) / r(0).
-static float estimate_tempo(float *conf)
+static float s_r[64], s_r_lo, s_r_hi;    // the last autocorrelation (for tempo_score)
+
+// Prior-weighted autocorrelation at a given tempo (interpolated between lags), from the last
+// estimate_tempo(): how well that tempo fits the recent onsets.
+static float tempo_score(float bpm)
+{
+    float lag = FRAME_HZ * 60 / bpm;
+    if (lag < s_r_lo || lag > s_r_hi) return 0;
+    int i = (int)lag;
+    float f = lag - i, v = s_r[i] * (1 - f) + s_r[i + 1] * f;
+    float oct = log2f(bpm / 120);
+    return v * expf(-0.5f * oct * oct / (PRIOR_OCT * PRIOR_OCT));
+}
+
+// The autocorrelation peak nearest a tempo (within FOLLOW_WIN), interpolated: the tempo the
+// music has moved to if it changes gradually. Returns 0 if there's no peak there; *height gets
+// its (unweighted) height. Uses the last estimate_tempo().
+static float local_peak(float bpm, float *height)
+{
+    float centre = FRAME_HZ * 60 / bpm;
+    int lo = (int)floorf(centre * (1 - FOLLOW_WIN)), hi = (int)ceilf(centre * (1 + FOLLOW_WIN));
+    if (lo < s_r_lo) lo = s_r_lo;
+    if (hi > s_r_hi) hi = s_r_hi;
+    float best_at = 0, best_h = 0;
+    for (int lag = lo; lag <= hi; lag++) {
+        float y0 = s_r[lag - 1], y1 = s_r[lag], y2 = s_r[lag + 1];
+        if (y1 < y0 || y1 < y2) continue;
+        float den = y0 - 2 * y1 + y2;
+        float at = lag + (den < 0 ? 0.5f * (y0 - y2) / den : 0);
+        float h = den < 0 ? y1 - 0.125f * (y0 - y2) * (y0 - y2) / den : y1;
+        if (best_at == 0 || fabsf(at - centre) < fabsf(best_at - centre)) { best_at = at; best_h = h; }
+    }
+    *height = best_h;
+    return best_at > 0 ? FRAME_HZ * 60 / best_at : 0;
+}
+
+static IRAM_ATTR float estimate_tempo(const float *curve, float *conf)
 {
     float o[ONSET_N], mean = 0;
     for (int i = 0; i < ONSET_N; i++) {
-        o[i] = s_onsets[(s_onset_pos + i) % ONSET_N];   // oldest first
+        o[i] = curve[(s_onset_pos + i) % ONSET_N];   // oldest first
         mean += o[i];
     }
     mean /= ONSET_N;
     for (int i = 0; i < ONSET_N; i++) o[i] -= mean;
+    // Smooth it (1-2-1): a period between two analysis steps then peaks as clearly as one that
+    // lands on a step (16th notes are ~5.1 steps apart at 126 BPM).
+    for (int pass = 0; pass < SMOOTH_PASSES; pass++) {
+        float prev = o[0];
+        for (int i = 1; i < ONSET_N - 1; i++) {
+            float cur = o[i];
+            o[i] = 0.25f * prev + 0.5f * cur + 0.25f * o[i + 1];
+            prev = cur;
+        }
+    }
     int lo = (int)floorf(FRAME_HZ * 60 / BPM_MAX), hi = (int)ceilf(FRAME_HZ * 60 / BPM_MIN);
-    float r[64], r0 = 0;
+    int flo = (int)floorf(FRAME_HZ * 60 / FOLLOW_MAX), fhi = (int)ceilf(FRAME_HZ * 60 / FOLLOW_MIN);
+    float *r = s_r, r0 = 0;
     for (int i = 0; i < ONSET_N; i++) r0 += o[i] * o[i];
-    for (int lag = lo - 1; lag <= hi + 1; lag++) {
+    for (int lag = flo - 1; lag <= fhi + 1; lag++) {
         float sum = 0;
         for (int i = lag; i < ONSET_N; i++) sum += o[i] * o[i - lag];
         r[lag] = sum / (ONSET_N - lag) * ONSET_N;   // unbiased
     }
-    int best = -1;
-    float best_score = 0;
+    // Each peak is scored by its interpolated height at its interpolated lag: a period that falls
+    // between two steps would otherwise lose to one that lands on a step.
+    float best_lag = 0, best_score = 0, best_r = 0;
     for (int lag = lo; lag <= hi; lag++) {
-        float oct = log2f(FRAME_HZ * 60 / lag / 120);
-        float score = r[lag] * expf(-0.5f * oct * oct / (PRIOR_OCT * PRIOR_OCT));
-        if (best < 0 || score > best_score) { best = lag; best_score = score; }
+        float y0 = r[lag - 1], y1 = r[lag], y2 = r[lag + 1];
+        if (y1 < y0 || y1 < y2) continue;   // not a peak
+        float den = y0 - 2 * y1 + y2;
+        float d = den < 0 ? 0.5f * (y0 - y2) / den : 0;
+        float height = den < 0 ? y1 - 0.125f * (y0 - y2) * (y0 - y2) / den : y1;
+        float at = lag + d;
+        float oct = log2f(FRAME_HZ * 60 / at / 120);
+        float score = height * expf(-0.5f * oct * oct / (PRIOR_OCT * PRIOR_OCT));
+        if (best_lag == 0 || score > best_score) { best_lag = at; best_score = score; best_r = height; }
     }
-    *conf = r0 > 0 && best > 0 ? r[best] / r0 : 0;
-    if (best < 0 || r0 <= 0) return 0;
-    float y0 = r[best - 1], y1 = r[best], y2 = r[best + 1], den = y0 - 2 * y1 + y2;
-    float lag = best + (den < 0 ? 0.5f * (y0 - y2) / den : 0);
-    return FRAME_HZ * 60 / lag;
+    s_r_lo = flo;   // the following looks a bit further (FOLLOW_MIN..FOLLOW_MAX)
+    s_r_hi = fhi;
+    *conf = r0 > 0 && best_lag > 0 ? best_r / r0 : 0;
+    if (best_lag <= 0 || r0 <= 0) return 0;
+    return FRAME_HZ * 60 / best_lag;
 }
 
-// Where the beats fall: the offset (0..1 of a period, before now) whose grid of beats over the
-// low-end onset history collects the most energy (kicks and bass, not off-beat hi-hats).
+// How well the kick-range curve matches itself one beat, or two beats, back (kicks on every beat,
+// or on 1 and 3), relative to itself: whether there's a steady kick at this tempo.
+static IRAM_ATTR float kick_fit(float bpm)
+{
+    if (bpm <= 0) return 0;
+    float o[ONSET_N], mean = 0, r0 = 0, best = 0;
+    for (int i = 0; i < ONSET_N; i++) {
+        o[i] = s_kicks[(s_onset_pos + i) % ONSET_N];
+        mean += o[i];
+    }
+    mean /= ONSET_N;
+    for (int i = 0; i < ONSET_N; i++) {
+        o[i] -= mean;
+        r0 += o[i] * o[i];
+    }
+    if (r0 <= 0) return 0;
+    for (int mult = 1; mult <= 2; mult++) {
+        int centre = (int)lroundf(mult * FRAME_HZ * 60 / bpm);
+        for (int lag = centre - 1; lag <= centre + 1; lag++) {
+            if (lag < 1 || lag > ONSET_N / 2) continue;
+            float sum = 0;
+            for (int i = lag; i < ONSET_N; i++) sum += o[i] * o[i - lag];
+            best = fmaxf(best, sum / (ONSET_N - lag) * ONSET_N / r0);
+        }
+    }
+    return best;
+}
+
+// Where the beats fall: the offset (0..1 of a period, before now) whose grid of beats over an
+// onset history collects the most energy: the low end's (kicks and bass, not off-beat hi-hats),
+// or without a kick the upper curve the tempo came from.
 // Returns the phase it implies now.
-static float comb_phase(float lag)
+static IRAM_ATTR float comb_phase(float lag, const float *curve)
 {
     const int STEPS = 16;
     float best_score = -1, best = 0;
@@ -266,18 +376,31 @@ static float comb_phase(float lag)
         float off = (float)s / STEPS, score = 0;
         for (float back = off * lag; back < ONSET_N - 2; back += lag) {
             int i = (int)back;   // analyses ago; take the stronger of the two neighbours
-            float a = s_onsets_low[(s_onset_pos - 1 - i + 2 * ONSET_N) % ONSET_N];
-            float b = s_onsets_low[(s_onset_pos - 2 - i + 2 * ONSET_N) % ONSET_N];
-            score += fmaxf(a, b);
+            float a = curve[(s_onset_pos - 1 - i + 2 * ONSET_N) % ONSET_N];
+            float b = curve[(s_onset_pos - 2 - i + 2 * ONSET_N) % ONSET_N];
+            float v = fmaxf(a, b);
+            score += COMB_POW == 2 ? v * v : v;   // squared: the strongest hit per beat counts most
         }
         if (score > best_score) { best_score = score; best = off; }
     }
     return best;   // a beat was `best` periods ago: that is the phase now
 }
 
+// Follow the autocorrelation peak next to the current tempo, if it's a solid one (at least
+// LOCAL_MIN of the peak at the best estimate). Returns whether it did.
+static bool follow_local(void)
+{
+    float h, best_h;
+    float near = local_peak(s_music_bpm, &h);
+    local_peak(s_last_est, &best_h);
+    if (near <= 0 || h < LOCAL_MIN * best_h) return false;
+    s_music_bpm += FOLLOW_RATE * (near - s_music_bpm);
+    return true;
+}
+
 /* ---------- analysis ---------- */
 
-static void analyse(const float *hop, int64_t now, bool demo)
+static void analyse(const float *hop, int64_t now)
 {
     memmove(s_ring, s_ring + HOP, (N - HOP) * sizeof(float));
     memcpy(s_ring + N - HOP, hop, HOP * sizeof(float));
@@ -286,8 +409,12 @@ static void analyse(const float *hop, int64_t now, bool demo)
     for (int i = 0; i < HOP; i++) sq += hop[i] * hop[i];
     float rms = sqrtf(sq / HOP);
     float db = 20 * log10f(rms + 1e-9f);
+    // The gate opens at its level and closes GATE_HYST_DB below it: room noise right at the
+    // gate doesn't make the sound come and go.
     float gate_amp = powf(10, -(float)g_config.mic_gate / 20);
-    bool signal = rms > gate_amp;
+    bool signal = rms > (s_gate_open ? gate_amp * GATE_HYST : gate_amp);
+    s_gate_open = signal;
+    s_open_ratio = 0.985f * s_open_ratio + (signal ? 0.015f : 0);
 
     for (int i = 0; i < N; i++) {
         s_re[i] = s_ring[i] * s_win[i];
@@ -306,8 +433,6 @@ static void analyse(const float *hop, int64_t now, bool demo)
     a.t_us = now;
     a.db = db;
     a.signal = signal;
-    a.demo = demo;
-    a.demo_forced = s_demo;
 
     // Levels: auto-gained, 0 below the gate. A band's gain is capped by the loudest band (its
     // floor is a fraction of that band's peak), so faint hiss doesn't show up as full scale.
@@ -344,13 +469,40 @@ static void analyse(const float *hop, int64_t now, bool demo)
 
     // Onsets: log spectral flux (how much the spectrum rose since the last analysis), mostly
     // from the low end, against an adaptive threshold of mean + k * spread.
-    float eps = gate_amp * 0.1f, flux = 0, flux_low = 0;
-    for (int b = 1; b <= ONSET_HI; b++) {
+    float eps = gate_amp * 0.1f, flux = 0, flux_low = 0, flux_up = 0;
+    for (int b = 1; b <= UPPER_TOP; b++) {
         float lm = logf(s_mag[b] + eps);
         float rise = signal ? fmaxf(0, lm - s_prev_log[b]) : 0;
         if (b <= ONSET_BINS) flux_low += rise;
-        flux += rise * (b <= ONSET_BINS ? 1 : ONSET_HI_W);
+        else flux_up += rise;
+        if (b <= ONSET_HI) flux += rise * (b <= ONSET_BINS ? 1 : ONSET_HI_W);
         s_prev_log[b] = lm;
+    }
+    // Kicks: a rise in the kick range that is most of the frame's rise in energy (a note's
+    // attack clicks down there too, but rises mostly higher up).
+    float e_kick = 0, e_all = 0, kflux = 0;
+    for (int b = 1; b <= ONSET_HI; b++) {
+        float e = s_mag[b] * s_mag[b];
+        e_all += e;
+        if (b >= KICK_LO && b <= KICK_HI) e_kick += e;
+    }
+    float de_kick = e_kick - s_prev_e_kick, de_all = e_all - s_prev_e_all;
+    bool bassy = de_kick > 0 && de_kick >= KICK_SHARE * de_all;
+    s_prev_e_kick = e_kick;
+    s_prev_e_all = e_all;
+    for (int b = KICK_LO; b <= KICK_HI && signal; b++) {
+        kflux += fmaxf(0, logf(s_mag[b] + eps) - s_prev_kick[b]);
+    }
+    for (int b = KICK_LO; b <= KICK_HI; b++) s_prev_kick[b] = logf(s_mag[b] + eps);
+    if (!bassy) kflux = 0;
+    bool kick = kflux > ONSET_MIN && kflux > 2 * s_kick_mean && kflux > s_kick_prev &&
+                now - s_last_kick_us > ONSET_MIN_US;
+    s_kick_mean += 0.05f * (kflux - s_kick_mean);
+    s_kick_prev = kflux;
+    if (kick) {
+        s_last_kick_us = now;
+        memmove(s_kick_times, s_kick_times + 1, 3 * sizeof(int64_t));
+        s_kick_times[3] = now;
     }
     float sd = sqrtf(s_flux_var);
     float k = g_config.beat_sens / 10.0f;
@@ -368,55 +520,103 @@ static void analyse(const float *hop, int64_t now, bool demo)
     }
     s_onsets[s_onset_pos] = flux;
     s_onsets_low[s_onset_pos] = flux_low;
+    s_onsets_up[s_onset_pos] = flux_up;
+    s_kicks[s_onset_pos] = kflux;
     s_onset_pos = (s_onset_pos + 1) % ONSET_N;
 
     // Tempo, a few times a second: the beat period is the lag at which the onset curve best
     // matches itself, weighted towards ~120 BPM against half/double-time picks.
-    if (++s_tempo_tick % 8 == 0) {
-        float conf;
-        float bpm = estimate_tempo(&conf);
+    bool update = ++s_tempo_tick % 8 == 0;
+    if (update) {
+        // Two readings: the upper curve's first, then (with a steady kick) the main curve's, so
+        // the following below works on the autocorrelation of the one in use.
+        float conf_up, conf;
+        estimate_tempo(s_onsets_up, &conf_up);
+        // A tempo counts with a few clear hits behind it (a steady tone or hiss has none).
         bool active = s_onset_times[0] && now - s_onset_times[0] < 3000000;   // 4 onsets in 3 s
-        if (conf < 0.12f || !signal || !active) {
-            if (s_music_bpm > 0 && now - s_tempo_seen_us > 5000000) {   // 5 s without a tempo: lost
-                s_music_bpm = 0;
-            }
-        } else {
-            s_tempo_seen_us = now;
-            if (s_music_bpm <= 0) {
-                s_music_bpm = bpm;
-            } else if (fabsf(bpm - s_music_bpm) < s_music_bpm * 0.06f) {
-                s_music_bpm += 0.2f * (bpm - s_music_bpm);
-                s_cand_n = 0;
-            } else if (s_cand_n > 0 && fabsf(bpm - s_cand) < s_cand * 0.06f) {
-                if (++s_cand_n >= 6) {   // a new tempo held ~1 s: the music changed
-                    s_music_bpm = bpm;
-                    s_cand_n = 0;
-                }
-            } else {
-                s_cand = bpm;
-                s_cand_n = 1;
-            }
+        if (signal) s_signal_seen_us = now;
+        // ... and a beat needs a steady kick: without one (an arpeggio, a breakdown, a build-up)
+        // there's no telling which notes are the beats, and the beats are the onsets instead.
+        // Without a kick, a very regular upper curve (a snare, claps, an arpeggio) gives the
+        // tempo instead, and the beats are placed by it.
+        bool kicking = s_kick_times[0] && now - s_kick_times[0] < KICK_WIN_US;   // 4 kicks in 3 s
+        float bpm = 0;
+        bool kick_ok = false;
+        if (kicking) {
+            bpm = estimate_tempo(s_onsets, &conf);
+            kick_ok = conf >= 0.12f && kick_fit(s_music_bpm > 0 ? s_music_bpm : bpm) >= KICK_FIT;
         }
-        set_tempo(&a);
-        if (a.locked) {
-            // Steer the phase towards where the onsets say the beats are: a third of the way,
-            // at most PHASE_STEP per update, so an odd pick can't make the beat jump.
-            // beat_offset_ms > 0 leads the music, to make up for the lights' own delay.
-            float target = comb_phase(FRAME_HZ * 60 / a.bpm) + g_config.beat_offset_ms / 1000.0f / a.period_s;
-            float err = target - a.phase;
-            err -= floorf(err + 0.5f);   // -0.5..0.5
-            float step = err / 3;
-            step = step > PHASE_STEP ? PHASE_STEP : step < -PHASE_STEP ? -PHASE_STEP : step;
-            float p = a.phase + step;
-            if (p >= 1) {                // moved forward across a beat: that's the beat
-                a.beats++;
-                a.last_beat_us = now;
+        bool upper_ok = !kick_ok && conf_up >= UPPER_CONF;
+        if (upper_ok) {
+            bpm = estimate_tempo(s_onsets_up, &conf);   // its autocorrelation for the following
+        }
+        s_last_est = bpm;
+        if (kick_ok || upper_ok) s_upper = upper_ok;
+        if (s_music_bpm > 0 && (kick_ok || upper_ok)) s_kick_seen_us = now;
+        bool ok = signal && s_open_ratio >= OPEN_MIN && active && (kick_ok || upper_ok);
+        if (s_music_bpm > 0 && (now - s_kick_seen_us > KICK_HOLD_US || now - s_signal_seen_us > SILENCE_DROP_US)) {
+            s_music_bpm = 0;   // lost: a few bars without a beat, or the sound stopped
+            s_cand_n = 0;
+        }
+        if (ok) {
+            if (s_music_bpm <= 0) {
+                // First lock: two estimates in a row that agree.
+                if (s_cand_n > 0 && fabsf(bpm - s_cand) < s_cand * 0.06f) {
+                    s_music_bpm = bpm;
+                    s_kick_seen_us = now;
+                    s_cand_n = 0;
+                } else {
+                    s_cand = bpm;
+                    s_cand_n = 1;
+                }
+            } else if (fabsf(bpm - s_music_bpm) < s_music_bpm * FOLLOW_WIN) {
+                // Follow it: gradual tempo changes (an accelerando) are tracked here.
+                s_music_bpm += FOLLOW_RATE * (bpm - s_music_bpm);
+                s_cand_n = 0;
+            } else {
+                // The best estimate is somewhere else: often another reading of the same music
+                // (twice as fast, 3/4...). Keep following our own peak, and let the other one
+                // take over only if it clearly fits better, with hits behind it, for ~4 s. An
+                // even stream of 16ths fits 4, 5 or 6 notes per beat about equally well, and must
+                // not make the beat wander between those.
+                follow_local();
+                bool better = active && tempo_score(bpm) >= SWITCH_MARGIN * tempo_score(s_music_bpm);
+                if (!better) {
+                    s_cand_n = 0;
+                } else if (s_cand_n > 0 && fabsf(bpm - s_cand) < s_cand * 0.06f) {
+                    if (++s_cand_n >= CAND_N) {   // held ~4 s: the music changed
+                        s_music_bpm = bpm;
+                        s_cand_n = 0;
+                    }
+                } else {
+                    s_cand = bpm;
+                    s_cand_n = 1;
+                }
             }
-            a.phase = p - floorf(p);
         }
     }
+    bool was_locked = a.locked;
+    set_tempo(&a);
+    if (update && a.locked) {
+        // Steer the phase towards where the onsets say the beats are: a third of the way,
+        // at most PHASE_STEP per update, so an odd pick can't make the beat jump.
+        // beat_offset_ms > 0 leads the music, to make up for the lights' own delay.
+        float target = comb_phase(FRAME_HZ * 60 / a.bpm, s_upper ? s_onsets_up : s_onsets_low) +
+                       g_config.beat_offset_ms / 1000.0f / a.period_s;
+        float err = target - a.phase;
+        err -= floorf(err + 0.5f);   // -0.5..0.5
+        float step = err / 3;
+        step = step > PHASE_STEP ? PHASE_STEP : step < -PHASE_STEP ? -PHASE_STEP : step;
+        if (!was_locked) step = err;   // a new lock: straight onto the beats
+        float p = a.phase + step;
+        if (p >= 1) {                // moved forward across a beat: that's the beat
+            a.beats++;
+            a.last_beat_us = now;
+        }
+        a.phase = p - floorf(p);
+    }
 
-    // Beats: with a tempo (the music's or the fallback), a steady grid; with neither, the onsets.
+    // Beats: with a tempo, a steady grid; without, the onsets.
     if (a.period_s > 0) {
         grid_advance(&a, dt, now);
     } else if (onset) {
@@ -466,10 +666,9 @@ static void audio_task(void *arg)
 {
     static int32_t raw[2 * HOP];   // interleaved left, right
     static float hop[HOP];
-    int64_t next = esp_timer_get_time();
     while (1) {
         bool have = false;
-        if (s_rx) {   // the microphone paces the analysis, also in demo mode
+        if (s_rx) {   // the microphone paces the analysis
             size_t got = 0;
             if (i2s_channel_read(s_rx, raw, sizeof(raw), &got, pdMS_TO_TICKS(1000)) == ESP_OK &&
                 got == sizeof(raw)) {
@@ -498,33 +697,42 @@ static void audio_task(void *arg)
                 }
                 if (alive[c]) s_last_mic_activity_us = esp_timer_get_time();
                 have = true;
+                audio_tap_t tap = s_tap;
+                if (tap) tap(hop, HOP);
             }
         }
-        // The demo track plays when asked to, or as the fallback: no microphone, or nothing
-        // above the noise gate for AUTO_DEMO_US. Any sound at the microphone switches back.
-        int64_t now = esp_timer_get_time();
-        if (have) {
-            float sq = 0;
-            for (int i = 0; i < HOP; i++) sq += hop[i] * hop[i];
-            if (sqrtf(sq / HOP) > powf(10, -(float)g_config.mic_gate / 20)) s_mic_loud_us = now;
-        }
-        bool demo = s_demo || (g_config.fallback_bpm && (!s_rx || now - s_mic_loud_us > AUTO_DEMO_US));
-        if (demo) {
-            if (!s_rx) {   // pace it ourselves
-                next += HOP_US;
-                int64_t wait = next - esp_timer_get_time();
-                if (wait < -100000) next = esp_timer_get_time();   // fell behind: don't burst
-                if (wait > 1000) vTaskDelay(pdMS_TO_TICKS(wait / 1000));
-            }
-            demo_fill(hop);
-            have = true;
-        } else if (!s_rx) {
+        if (!s_rx) {
             vTaskDelay(pdMS_TO_TICKS(20));
-            next = esp_timer_get_time();
-            idle_tick(next);
+            idle_tick(esp_timer_get_time());
         }
         if (have) {
-            analyse(hop, esp_timer_get_time(), demo);
+            // The block's time comes from the sample count, not from when this task got to it:
+            // the microphone's DMA buffers ~140 ms, and a task that runs late and then reads
+            // several blocks at once would squeeze their timestamps and move the beat. A block
+            // that arrives earlier than the count says puts the clock back on time; one that
+            // arrives later moves it only slowly (the I2S clock isn't exactly RATE).
+            int64_t got = esp_timer_get_time();
+            double predicted = s_clock_us + 1e6 * HOP / RATE;
+            if (s_clock_us == 0 || got < predicted || got - predicted > 500000) {
+                s_clock_us = got;   // first block, on time, or a gap (no data)
+            } else {
+                s_clock_us = predicted + 0.002 * (got - predicted);
+            }
+            int32_t late = (int32_t)(got - (int64_t)s_clock_us);
+            analyse(hop, (int64_t)s_clock_us);
+            int32_t proc = (int32_t)(esp_timer_get_time() - got);
+            if (got - s_diag_start_us > DIAG_US) {
+                s_proc_last_us = s_proc_max_us;
+                s_late_last_us = s_late_max_us;
+                s_proc_avg_us = s_proc_n ? (int32_t)(s_proc_sum_us / s_proc_n) : 0;
+                s_proc_max_us = s_late_max_us = 0;
+                s_proc_sum_us = s_proc_n = 0;
+                s_diag_start_us = got;
+            }
+            if (proc > s_proc_max_us) s_proc_max_us = proc;
+            s_proc_sum_us += proc;
+            s_proc_n++;
+            if (late > s_late_max_us) s_late_max_us = late;
         }
     }
 }
@@ -543,13 +751,9 @@ float audio_phase_at(const audio_state_t *a, int64_t t_us)
     return p - floorf(p);
 }
 
-void audio_set_demo(bool on)
+void audio_set_tap(audio_tap_t tap)
 {
-    s_demo = on;
-    portENTER_CRITICAL(&s_mux);
-    s_state.demo_forced = on;
-    portEXIT_CRITICAL(&s_mux);
-    ESP_LOGI(TAG, "demo %s", on ? "on" : "off");
+    s_tap = tap;
 }
 
 cJSON *audio_json(void)
@@ -566,8 +770,11 @@ cJSON *audio_json(void)
     cJSON_AddNumberToObject(raw, "left_max", s_raw_max[0]);
     cJSON_AddNumberToObject(raw, "right_min", s_raw_min[1]);
     cJSON_AddNumberToObject(raw, "right_max", s_raw_max[1]);
-    cJSON_AddBoolToObject(r, "demo", a.demo);
-    cJSON_AddBoolToObject(r, "demo_forced", a.demo_forced);
+    // The last 10 s: the longest analysis of one block (of the ~23 ms between blocks), and the
+    // most the audio task ran behind the microphone.
+    cJSON_AddNumberToObject(r, "proc_ms_max", (s_proc_last_us > s_proc_max_us ? s_proc_last_us : s_proc_max_us) / 1000.0);
+    cJSON_AddNumberToObject(r, "proc_ms_avg", s_proc_avg_us / 1000.0);
+    cJSON_AddNumberToObject(r, "late_ms_max", (s_late_last_us > s_late_max_us ? s_late_last_us : s_late_max_us) / 1000.0);
     cJSON_AddBoolToObject(r, "signal", a.signal);
     cJSON_AddNumberToObject(r, "db", roundf(a.db * 10) / 10);
     cJSON_AddNumberToObject(r, "level", a.level);

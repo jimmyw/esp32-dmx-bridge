@@ -99,6 +99,8 @@ static uint32_t      s_seen_beats;           // audio beat count at the previous
 static double        s_beat_time;            // audio.time: beats elapsed, smooth
 static float         s_last_phase;
 static int64_t       s_last_audio_us;
+static float         s_fb_phase;             // the timed beat's phase (no tempo from the microphone)
+static uint32_t      s_beats_out;            // audio.beats: beats this script has seen
 static int64_t       s_start_us, s_last_us;
 static volatile int64_t s_deadline_us;      // exec timeout, 0 = none
 static const char   *s_deadline_what;       // "frame()" or "top-level code"
@@ -629,23 +631,45 @@ static const duk_function_list_entry s_natives[] = {
 
 // Refresh the global `audio` object (created on start): on, signal, level, bass, mid, high,
 // bands[16], beat (a beat since the previous frame), beats, bpm, locked, phase, time.
+//
+// The beat follows the microphone's tempo when there is one (locked). Without one (no
+// microphone, silence, music without a beat) a timed beat at the fallback tempo (config
+// fallback_bpm) takes its place, carrying on from the music's phase; with the fallback off, the
+// beats are the sound's onsets as they come and the phase stays at 0.
 static void push_audio(int64_t now)
 {
     audio_state_t a;
     audio_get(&a);
-    // Beat clock: follows the phase while there's a tempo (never backwards: the phase lock may
-    // nudge it back a little), else (no grid at all: fallback off) runs on at 120 BPM.
-    float phase = audio_phase_at(&a, now);
+    float dt = s_last_audio_us ? (now - s_last_audio_us) / 1e6f : 0;
+    float phase, bpm = 0;
+    bool beat;
     if (a.period_s > 0) {
+        // Beat clock: follows the phase (never backwards: the phase lock may nudge it back).
+        phase = audio_phase_at(&a, now);
+        bpm = a.bpm;
         float d = phase - s_last_phase;
         if (d < -0.5f) d += 1;
         if (d > 0.5f) d -= 1;
         if (d > 0) s_beat_time += d;
-    } else if (s_last_audio_us) {
-        s_beat_time += (now - s_last_audio_us) / 1e6 * 2;
+        beat = a.beats != s_seen_beats;
+        s_fb_phase = phase;   // a timed beat taking over carries on from here
+    } else if (g_config.fallback_bpm) {
+        bpm = g_config.fallback_bpm;
+        float d = dt * bpm / 60;
+        s_beat_time += d;
+        s_fb_phase += d;
+        beat = s_fb_phase >= 1;
+        s_fb_phase -= floorf(s_fb_phase);
+        phase = s_fb_phase;
+    } else {
+        phase = 0;
+        s_beat_time += dt * 2;   // 120 BPM: motion keyed to audio.time keeps going
+        beat = a.beats != s_seen_beats;
     }
+    if (beat) s_beats_out++;
     s_last_phase = phase;
     s_last_audio_us = now;
+    s_seen_beats = a.beats;
     duk_get_global_string(s_ctx, "audio");
     if (!duk_is_object(s_ctx, -1)) {   // the script replaced it
         duk_pop(s_ctx);
@@ -653,21 +677,20 @@ static void push_audio(int64_t now)
     }
 #define PUT_NUM(key, v)  (duk_push_number(s_ctx, (v)), duk_put_prop_string(s_ctx, -2, key))
 #define PUT_BOOL(key, v) (duk_push_boolean(s_ctx, (v)), duk_put_prop_string(s_ctx, -2, key))
-    PUT_BOOL("on", a.mic || a.demo);
+    PUT_BOOL("on", a.mic);
     PUT_BOOL("signal", a.signal);
     PUT_NUM("level", a.level);
     PUT_NUM("bass", a.bass);
     PUT_NUM("mid", a.mid);
     PUT_NUM("high", a.high);
-    PUT_BOOL("beat", a.beats != s_seen_beats);
-    PUT_NUM("beats", a.beats);
-    PUT_NUM("bpm", a.bpm);
-    PUT_BOOL("locked", a.locked);
+    PUT_BOOL("beat", beat);
+    PUT_NUM("beats", s_beats_out);
+    PUT_NUM("bpm", bpm);
+    PUT_BOOL("locked", a.period_s > 0);
     PUT_NUM("phase", phase);
     PUT_NUM("time", s_beat_time);
 #undef PUT_NUM
 #undef PUT_BOOL
-    s_seen_beats = a.beats;
     duk_get_prop_string(s_ctx, -1, "bands");
     if (duk_is_array(s_ctx, -1)) {
         for (int i = 0; i < AUDIO_BANDS; i++) {
@@ -813,6 +836,8 @@ static void engine_start(const char *name, bool guarded)
     audio_state_t as;
     audio_get(&as);
     s_seen_beats = as.beats;   // no stale beat on the first frame
+    s_beats_out = 0;
+    s_fb_phase = 0;
     s_beat_time = 0;
     s_last_audio_us = 0;
     s_last_phase = audio_phase_at(&as, esp_timer_get_time());

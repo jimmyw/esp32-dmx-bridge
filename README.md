@@ -240,11 +240,23 @@ them in Settings):
 The bridge samples it at 22.05 kHz and runs a 1024-point FFT about 43 times a second on core 1
 (`main/audio.c`). From that come the level, bass/mid/high and 16 bands, all auto-gained against
 their recent peak and gated below the noise floor. Beats are found in three steps:
-1. **Onsets:** jumps in the spectrum (log spectral flux, mostly the low end).
+1. **Onsets:** jumps in the spectrum (log spectral flux), as two curves: the low end (kick,
+   bass) and everything above it (snares, claps, hats, notes).
 2. **Tempo:** the autocorrelation of the last 6 s of onsets over 70–180 BPM, leaning towards
    120. A stray hit barely moves it.
-3. **Beat grid:** a steady grid whose phase is pulled towards where the onsets line up. Effects
-   get an even beat, not every bass note.
+   - **Where it comes from:** a steady kick (or bass hit) on every beat, or every other beat.
+     Without one, a very regular upper curve (a snare, claps, an arpeggio) gives it. With neither,
+     the Sound card shows *no beat*.
+   - **Build-ups:** a tempo that speeds up past 180 halves (every other beat kept on the grid),
+     and one that slows below 70 doubles.
+   - **Changing the tempo:** a new tempo replaces the current one only if it fits 25% better for
+     about 4 s, with real hits behind it. An even stream of 16th notes fits 4, 5 or 6 notes per
+     beat about equally well, and mustn't make the beat wander.
+   - **Breakdowns:** the tempo is held for 4 s after the beat stops, and dropped after 5 s of
+     silence.
+3. **Beat grid:** a steady grid whose phase is pulled towards where the onsets line up: the
+   strongest low-end hits (the kick rather than an off-beat bass), or the upper curve the tempo
+   came from. Effects get an even beat, not every bass note.
  Scripts read all of it from the `audio` object
 ([scripts/README.md](scripts/README.md#music-the-audio-object)), and the start page's **Sound**
 card shows it live: spectrum, meters, beat flash, phase ring and BPM.
@@ -254,28 +266,26 @@ shifts the whole beat grid: the LED, `audio.beat`/`phase`/`time` and the ring. P
 make beats come earlier, to make up for lights that react late (DMX frame, fixture response,
 motors). It applies at once and is saved.
 
-**Demo track and tempo:** the demo track (kick, off-beat hi-hat, a pad, at the *Demo* slider's tempo,
-config `fallback_bpm`, 60–200 BPM, default 120) is the fallback for when there's no music:
-- **The microphone hears nothing for 3 s, or there is none:** the demo plays by itself, so beat
-  effects, the LED and the Sound card keep going.
-- **Sound but no beat:** talking or ambient music keeps the beat running at the same tempo.
-- **Music:** its own tempo takes over. Any sound at the microphone switches back from the demo at
-  once, and the music's tempo is held for 5 s after it stops.
-- **Demo button:** forces the demo even while music plays.
-- **Slider at the far left:** no automatic demo, and silence stays silent.
+**Fallback tempo:** the bridge only reports what it hears; silence stays silent. Effect scripts,
+though, get a timed beat at the *Fallback* slider's tempo (config `fallback_bpm`, 60–180 BPM,
+default 120) whenever the microphone gives no tempo: no microphone, silence, or sound without a
+beat. It carries on from the music's last beat, and `audio.locked` tells the two apart. At the
+far left the fallback is off, and scripts get no beat without music.
 
 **Beat LED:** the board's addressable RGB LED (WS2812, default GPIO 48; DevKitC-1 v1.1 uses 38;
 `menuconfig` → *DMX Bridge* → RGB LED GPIO, -1 = off) flashes on every beat, so the lock can be
 checked by eye. Some boards only connect the LED once their "RGB" solder jumper is bridged. On
 the serial console, `rgbled 255 255 255` lights it white for 5 s, and `rgbled pin <gpio>` tries
 another pin until the next restart. Green means
-locked to the tempo, amber means a beat with no tempo found in the sound, blue means onsets only
-(nothing to lock to, the demo off), and a purple tint means the demo track plays.
+locked to the tempo, blue means onsets only (sound without a tempo), off means nothing is heard.
+It shows the microphone only, never the scripts' fallback beat.
 
-Settings → *Microphone*: pins (all -1 = none), the noise gate (default -75 dBFS; the INMP441 hears a quiet room at about -80, music at -65 to -45) and the beat
-sensitivity (an onset must stand 1.4× its recent spread above the average). **Demo** on the Sound card, or
-`audio demo on` on the serial console, forces the demo track (see below). `GET /api/audio` returns the analysis as JSON, and
-`POST /api/audio {"demo":true}` switches the demo.
+Settings → *Microphone*: pins (all -1 = none), the noise gate (default -62 dBFS, also on the Sound card next to the live level: set it above the room's noise and below the music; a quiet room is about -75 at the INMP441, music -55 to -38) and the beat
+sensitivity (an onset must stand 1.4× its recent spread above the average). `GET /api/audio`
+returns the analysis as JSON, with timing diagnostics (`proc_ms_avg`/`proc_ms_max`: analysis time
+per ~23 ms block; `late_ms_max`: how far the audio task ran behind). For tuning, TCP port 7001
+streams the raw microphone signal (32-bit float, 22.05 kHz mono) to one client until it
+disconnects: `nc <bridge> 7001 > rec.f32`.
 
 ## Web UI
 
@@ -343,7 +353,7 @@ The USB-Serial/JTAG port carries the log and a command line (`dmx>` prompt):
 | `hide <ch>` / `unhide <ch\|all>` | hide / show channels on the web console |
 | `scene list` / `save <n> [name]` / `recall <n> [fade s]` / `rename <n> <name>` / `delete <n>` | console scenes |
 | `script [list]` / `run <name>` / `stop` / `log` / `param <name> <value>` | effect scripts |
-| `audio` / `audio demo on\|off` | microphone analysis (level, bands, beats, BPM) / demo track |
+| `audio` | microphone analysis (level, bands, beats, BPM) |
 | `dmx [n]` | show the first n output channels (default 32) |
 | `log <level> [tag]` | change log verbosity, e.g. `log warn` to quiet the console |
 | `reboot` / `factory_reset yes` | restart / erase all settings |

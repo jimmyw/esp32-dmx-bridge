@@ -1,4 +1,4 @@
-// Beat pulse: plays to the music (microphone, or the Demo track on the start page). The colour
+// Beat pulse: plays to the music (microphone; without it, the timed Fallback beat). The colour
 // steps on every beat, the dimmer pumps with the bass, and the heads sweep side to side locked
 // to the beat. Lights and channels: setup.js.
 include('setup');

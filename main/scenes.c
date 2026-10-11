@@ -226,7 +226,8 @@ esp_err_t scenes_recall(int id, uint32_t fade_ms)
     s_active = id;
     s_fading = true;
     if (!s_fade_task) {
-        xTaskCreate(fade_task, "scene_fade", 3072, NULL, 6, &s_fade_task);
+        // Core 0: core 1 is the DMX output and the audio analysis.
+        xTaskCreatePinnedToCore(fade_task, "scene_fade", 3072, NULL, 6, &s_fade_task, 0);
     }
     xSemaphoreGive(s_lock);
     xTaskNotifyGive(s_fade_task);

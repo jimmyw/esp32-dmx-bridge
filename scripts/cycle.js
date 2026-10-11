@@ -8,7 +8,7 @@ var clock = effects.map(function () { return 0; });   // each effect's own runni
 function frame(t, dt) {
   var seconds = param('seconds', 20, 2, 300, 1);   // how long each effect runs
   var beats = param('beats', 0, 0, 64, 1);         // > 0: switch every that many beats instead
-  var byBeat = beats > 0 && audio.on;              // (needs the microphone or the demo track)
+  var byBeat = beats > 0;                          // the music's beats, or the timed fallback
   left -= dt;
   if (current < 0 || (byBeat ? audio.time >= until : left <= 0)) {
     current = (current + 1) % effects.length;

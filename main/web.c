@@ -6,6 +6,7 @@
 #include <string.h>
 #include "assets.h"
 #include "audio.h"
+#include "beat_led.h"
 #include "script_web.h"
 #include "cJSON.h"
 #include "config.h"
@@ -106,10 +107,15 @@ static esp_err_t status_get(httpd_req_t *req)
     audio_get(&au);
     cJSON *ao = cJSON_AddObjectToObject(r, "audio");
     cJSON_AddBoolToObject(ao, "mic", au.mic);
-    cJSON_AddBoolToObject(ao, "demo", au.demo);
     cJSON_AddBoolToObject(ao, "signal", au.signal);
     cJSON_AddNumberToObject(ao, "bpm", roundf(au.bpm * 10) / 10);
     cJSON_AddBoolToObject(ao, "locked", au.locked);
+    int led_avg, led_max, led_late;
+    beat_led_stats(&led_avg, &led_max, &led_late);
+    cJSON *lo = cJSON_AddObjectToObject(r, "beat_led");   // its cost per update, in us
+    cJSON_AddNumberToObject(lo, "busy_us_avg", led_avg);
+    cJSON_AddNumberToObject(lo, "busy_us_max", led_max);
+    cJSON_AddNumberToObject(lo, "late_us_max", led_late);
 
     cJSON *w = cJSON_AddObjectToObject(r, "wifi");
     cJSON_AddBoolToObject(w, "sta", wifi_mgr_sta_connected());
@@ -307,30 +313,6 @@ static esp_err_t audio_get_handler(httpd_req_t *req)
     return send_json(req, audio_json());
 }
 
-// POST /api/audio {"demo":true}: synthesized 120 BPM test signal instead of the microphone
-static esp_err_t audio_post(httpd_req_t *req)
-{
-    char body[64] = "";
-    int n = req->content_len < (int)sizeof(body) - 1 ? req->content_len : (int)sizeof(body) - 1;
-    if (n > 0 && httpd_req_recv(req, body, n) == n) {
-        body[n] = '\0';
-    }
-    cJSON *root = cJSON_Parse(body);
-    const cJSON *demo = cJSON_GetObjectItemCaseSensitive(root, "demo");
-    bool ok = cJSON_IsBool(demo);
-    if (ok) {
-        audio_set_demo(cJSON_IsTrue(demo));
-    }
-    cJSON_Delete(root);
-    cJSON *r = audio_json();
-    cJSON_AddBoolToObject(r, "ok", ok);
-    if (!ok) {
-        cJSON_AddStringToObject(r, "error", "expected {\"demo\":true|false}");
-        httpd_resp_set_status(req, "400 Bad Request");
-    }
-    return send_json(req, r);
-}
-
 static esp_err_t reboot_post(httpd_req_t *req)
 {
     cJSON *r = cJSON_CreateObject();
@@ -493,7 +475,6 @@ esp_err_t web_start(void)
         { .uri = "/api/factory_reset", .method = HTTP_POST, .handler = factory_reset_post },
         { .uri = "/api/ota",           .method = HTTP_POST, .handler = ota_post },
         { .uri = "/api/audio",         .method = HTTP_GET,  .handler = audio_get_handler },
-        { .uri = "/api/audio",         .method = HTTP_POST, .handler = audio_post },
         { .uri = "/*",                 .method = HTTP_GET,  .handler = redirect_get },
     };
     const size_t n = sizeof(uris) / sizeof(uris[0]);

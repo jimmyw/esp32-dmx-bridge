@@ -105,7 +105,7 @@ static int cmd_config(int argc, char **argv)
     printf("mic_gate        = %u  (-%u dBFS)\n", c->mic_gate, c->mic_gate);
     printf("beat_sens       = %u  (x%.1f)\n", c->beat_sens, c->beat_sens / 10.0);
     printf("beat_offset_ms  = %d  (beats %s)\n", c->beat_offset_ms, c->beat_offset_ms >= 0 ? "earlier" : "later");
-    printf("fallback_bpm    = %u%s\n", c->fallback_bpm, c->fallback_bpm ? "" : "  (off)");
+    printf("fallback_bpm    = %u%s\n", c->fallback_bpm, c->fallback_bpm ? "  (scripts' beat without music)" : "  (off)");
     return 0;
 }
 
@@ -129,24 +129,20 @@ static int cmd_rgbled(int argc, char **argv)
     return err == ESP_OK ? 0 : 1;
 }
 
-/* ---- audio [demo on|off] ---- */
+/* ---- audio ---- */
 
 static int cmd_audio(int argc, char **argv)
 {
-    if (argc == 3 && strcmp(argv[1], "demo") == 0) {
-        audio_set_demo(strcmp(argv[2], "on") == 0);
-    } else if (argc != 1) {
-        printf("Usage: audio [demo on|off]\n");
+    if (argc != 1) {
+        printf("Usage: audio\n");
         return 1;
     }
     audio_state_t a;
     audio_get(&a);
-    printf("mic %s%s, input %.1f dBFS%s\n", a.mic ? "on" : "not configured",
-           a.demo ? (a.demo_forced ? " (demo)" : " (demo: nothing heard)") : "",
-           a.db, a.signal ? "" : " (below gate)");
+    printf("mic %s, input %.1f dBFS%s\n", a.mic ? "on" : "not configured", a.db,
+           a.signal ? "" : " (below gate)");
     printf("level %.2f  bass %.2f  mid %.2f  high %.2f\n", a.level, a.bass, a.mid, a.high);
-    printf("beats %lu  bpm %.1f%s\n", (unsigned long)a.beats, a.bpm,
-           a.bpm <= 0 ? "" : a.locked ? " (from the music)" : " (fallback)");
+    printf("beats %lu  bpm %.1f%s\n", (unsigned long)a.beats, a.bpm, a.bpm > 0 ? "" : " (no tempo)");
     return 0;
 }
 
@@ -548,7 +544,7 @@ esp_err_t cli_start(void)
           .func = cmd_script },
         { .command = "rgbled", .help = "Beat LED test: rgbled <r> <g> <b> [ms] (default 5 s), rgbled pin <gpio>",
           .func = cmd_rgbled },
-        { .command = "audio", .help = "Microphone analysis: audio [demo on|off]", .func = cmd_audio },
+        { .command = "audio", .help = "Microphone analysis", .func = cmd_audio },
         { .command = "log", .help = "Set log level: log <none|error|warn|info|debug> [tag]", .func = cmd_log },
         { .command = "reboot", .help = "Restart the bridge", .func = cmd_reboot },
         { .command = "factory_reset", .help = "Erase all settings: factory_reset yes", .func = cmd_factory_reset },

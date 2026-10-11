@@ -21,10 +21,11 @@ static const char *TAG = "console";
  *   client -> server: repeated 3-byte records [ch_hi, ch_lo, value]; ch 0..511, 0xFFFF = master.
  *                     text "clear" zeroes all console faders.
  *                     text "audio" subscribes to audio frames for ~5 s (clients repeat it).
- *   server -> client: every PUSH_MS: [0x01][master][manual x512][output x512]
+ *   server -> client: every PUSH_MS: [0x01][master][manual x512][output x512] (not to audio
+ *                     subscribers: the Sound card has no use for it)
  *                     text "names" / "scenes" / "scripts" when those changed (clients re-fetch).
- *                     to audio subscribers, every PUSH_MS: [0x02][flags: 1 mic, 2 demo playing,
- *                     4 signal, 8 locked, 16 demo forced]
+ *                     to audio subscribers, every PUSH_MS: [0x02][flags: 1 mic, 4 signal,
+ *                     8 locked]
  *                     [level][bass][mid][high] (0-255) [beats u16 LE][bpm x10 u16 LE][phase 0-255]
  *                     [dB + 100][bands x16][spectrum x32]
  */
@@ -38,6 +39,7 @@ static const char *TAG = "console";
 
 static httpd_handle_t s_server;
 static volatile int s_idle_left;
+static volatile bool s_push_queued;   // a push is waiting in the server's queue: don't add another
 static struct { int fd; int stalled; } s_stall[MAX_CLIENTS];
 #define AUDIO_SUB_US 5000000
 static struct { int fd; int64_t until_us; } s_audio_subs[MAX_CLIENTS];   // fd recycled: expires
@@ -132,7 +134,7 @@ static size_t audio_frame(uint8_t *p)
     int64_t now = esp_timer_get_time();
     uint8_t *q = p;
     *q++ = 0x02;
-    *q++ = (a.mic ? 1 : 0) | (a.demo ? 2 : 0) | (a.signal ? 4 : 0) | (a.locked ? 8 : 0) | (a.demo_forced ? 16 : 0);
+    *q++ = (a.mic ? 1 : 0) | (a.signal ? 4 : 0) | (a.locked ? 8 : 0);
     *q++ = (uint8_t)(a.level * 255 + 0.5f);
     *q++ = (uint8_t)(a.bass * 255 + 0.5f);
     *q++ = (uint8_t)(a.mid * 255 + 0.5f);
@@ -156,6 +158,7 @@ static void push_work(void *arg)
     static uint8_t frame[2 + 2 * DMX_SLOTS];
     size_t fds_n = MAX_CLIENTS;
     int fds[MAX_CLIENTS];
+    s_push_queued = false;
     if (httpd_get_client_list(s_server, &fds_n, fds) != ESP_OK) {
         return;
     }
@@ -174,8 +177,9 @@ static void push_work(void *arg)
             int *stalled = stall_counter(fds[i]);
             if (writable(fds[i])) {
                 if (stalled) *stalled = 0;
-                httpd_ws_send_frame_async(s_server, fds[i], &f);
-                if (audio_subscribed(fds[i], now) && writable(fds[i])) {
+                if (!audio_subscribed(fds[i], now)) {
+                    httpd_ws_send_frame_async(s_server, fds[i], &f);
+                } else {
                     httpd_ws_frame_t af = { .type = HTTPD_WS_TYPE_BINARY, .payload = abuf, .len = alen, .final = true };
                     httpd_ws_send_frame_async(s_server, fds[i], &af);
                 }
@@ -417,8 +421,11 @@ static void push_task(void *arg)
     uint32_t tick = 0;
     while (1) {
         vTaskDelay(pdMS_TO_TICKS(PUSH_MS));
-        if (s_idle_left > 0 || (++tick % IDLE_SCAN) == 0) {
-            httpd_queue_work(s_server, push_work, NULL);
+        // While the server is busy, pushes are skipped, not queued up: a backlog would reach
+        // the pages late and then all at once.
+        if (!s_push_queued && (s_idle_left > 0 || (++tick % IDLE_SCAN) == 0)) {
+            s_push_queued = true;
+            if (httpd_queue_work(s_server, push_work, NULL) != ESP_OK) s_push_queued = false;
         }
     }
 }
