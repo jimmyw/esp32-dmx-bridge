@@ -156,6 +156,9 @@ All of `Math`, `JSON`, `Date` and so on are there too.
   `speed * t`. Otherwise every change of `speed` makes the heads jump.
 * **Fixture layout:** the examples drive `heads` from `setup.js`: four mini moving heads in
   12-channel mode at addresses 1, 13, 25 and 37. Change the rig there.
+* **Always set pan and tilt:** a channel no script or fader sets stays at 0, the end of the
+  travel, where a head can push against its stop and lose its place. The heads then no longer
+  line up; `reset-heads.js` makes them re-home (channel 11 at 255 for 6 s).
 
 ## Files and API
 
