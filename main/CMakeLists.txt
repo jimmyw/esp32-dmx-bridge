@@ -8,6 +8,10 @@ idf_component_register(
     EMBED_TXTFILES "script_prelude.js" "../scripts/fan-circle.js" "../scripts/color-chase.js"
                    "../scripts/figure-eight.js" "../scripts/setup.js"
                    "../scripts/cycle.js" "../scripts/beat-pulse.js" "../scripts/reset-heads.js"
+                   "../scripts/wave.js" "../scripts/scissors.js" "../scripts/ballyhoo.js"
+                   "../scripts/searchlight.js" "../scripts/beat-flash.js" "../scripts/beat-jump.js"
+                   "../scripts/spectrum.js" "../scripts/rainbow-fan.js" "../scripts/fan-converge.js"
+                   "../scripts/knight-rider.js"
 )
 
 # Web UI: webpack bundles web/src into one self-contained, gzipped HTML file per page

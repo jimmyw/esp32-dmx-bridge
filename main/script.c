@@ -51,9 +51,19 @@ EXAMPLE(setup_js)
 EXAMPLE(cycle_js)
 EXAMPLE(beat_pulse_js)
 EXAMPLE(reset_heads_js)
+EXAMPLE(wave_js)
+EXAMPLE(scissors_js)
+EXAMPLE(ballyhoo_js)
+EXAMPLE(searchlight_js)
+EXAMPLE(beat_flash_js)
+EXAMPLE(beat_jump_js)
+EXAMPLE(spectrum_js)
+EXAMPLE(rainbow_fan_js)
+EXAMPLE(fan_converge_js)
+EXAMPLE(knight_rider_js)
 // since: the seed version that added the file. A bridge seeded before gets just the newer files,
 // once, so a file the user deleted or changed stays that way.
-#define SEED_VERSION 5
+#define SEED_VERSION 6
 #define EXAMPLE_ENTRY(n, sym, v) { n, sym##_start, sym##_end, v }
 static const struct { const char *name; const char *start, *end; uint8_t since; } s_examples[] = {
     EXAMPLE_ENTRY("fan-circle", fan_circle_js, 1),
@@ -63,6 +73,16 @@ static const struct { const char *name; const char *start, *end; uint8_t since; 
     EXAMPLE_ENTRY("cycle", cycle_js, 3),
     EXAMPLE_ENTRY("beat-pulse", beat_pulse_js, 4),
     EXAMPLE_ENTRY("reset-heads", reset_heads_js, 5),
+    EXAMPLE_ENTRY("wave", wave_js, 6),
+    EXAMPLE_ENTRY("scissors", scissors_js, 6),
+    EXAMPLE_ENTRY("ballyhoo", ballyhoo_js, 6),
+    EXAMPLE_ENTRY("searchlight", searchlight_js, 6),
+    EXAMPLE_ENTRY("beat-flash", beat_flash_js, 6),
+    EXAMPLE_ENTRY("beat-jump", beat_jump_js, 6),
+    EXAMPLE_ENTRY("spectrum", spectrum_js, 6),
+    EXAMPLE_ENTRY("rainbow-fan", rainbow_fan_js, 6),
+    EXAMPLE_ENTRY("fan-converge", fan_converge_js, 6),
+    EXAMPLE_ENTRY("knight-rider", knight_rider_js, 6),
 };
 
 typedef struct {

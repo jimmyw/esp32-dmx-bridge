@@ -19,9 +19,10 @@ var TYPES = {
             prism: 10, mode: 11, autoSpeed: 12, reset: 13 },
 };
 
-// Colour wheel positions (miniHead colour channel 0-139) and LED ring colours (strip 5-109),
-// for effects that step through colours. Tune them to your fixture.
-var WHEEL = [0, 20, 40, 60, 80, 100, 120];
+// Colour wheel positions and LED ring colours (strip 5-109), for effects that step through
+// colours. Tune them to your fixture. The mini head's wheel has full colours at 0-79; above that
+// it stops between two colours (half colours), which look bad, so effects only use these.
+var WHEEL = [0, 20, 40, 60];
 var RING  = [10, 25, 40, 55, 70, 85, 100];
 
 // The rig: one line per light, at its DMX start address.
@@ -33,11 +34,17 @@ var heads = [
 ];
 
 // Put the heads under DMX control: no built-in program, no strobe, fastest pan/tilt so they
-// follow the positions an effect streams. Effects call it every frame.
+// follow the positions an effect streams. It also starts colour, gobo, LED ring and prism from
+// white, open and off, so nothing is left over from the previous effect: an effect sets what it
+// uses after calling ready(). Effects call it every frame.
 function ready(list) {
   (list || heads).forEach(function (h) {
     h.mode = 0;
     h.speed = 0;
     h.strobe = 0;
+    h.color = WHEEL[0];
+    h.gobo = 0;
+    h.strip = 0;
+    h.prism = 0;
   });
 }

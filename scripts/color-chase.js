@@ -20,6 +20,7 @@ function frame(t, dt) {
   var step = Math.floor(pos);
   var a = 2 * Math.PI * phase;
 
+  ready();
   heads.forEach(function (h, i) {
     h.color = WHEEL[(step + i) % WHEEL.length];
     h.strip = RING[(step + i + 3) % RING.length];
@@ -27,7 +28,5 @@ function frame(t, dt) {
     h.pan = pan;
     h.gobo = gobo;
     h.dim = dim;
-    h.strobe = 0;
-    h.mode = 0;
   });
 }

@@ -8,6 +8,28 @@ Write and run them on the bridge's **Effect scripts** page (`http://<bridge>/scr
 them from the **FX** bar in the fader console. The files in this directory are the examples that
 come with the firmware; a fresh bridge gets a copy of each.
 
+| Effect | |
+|---|---|
+| `fan-circle` | The heads draw circles, each a bit behind the previous one. |
+| `figure-eight` | The heads trace an 8, every second one mirrored, the dimmer breathing. |
+| `color-chase` | Colours step along the row while the heads sway up and down. |
+| `wave` | The heads nod one after another, a wave rolling along the row. |
+| `scissors` | Side-to-side sweeps, every second head the other way, crossing in the middle. |
+| `ballyhoo` | Every head wanders on its own smooth path; the colours drift. |
+| `searchlight` | Open white beams sweep slowly in a wide arc. |
+| `rainbow-fan` | Calm: a fan of heads, gently nodding, colours rolling along the row. |
+| `knight-rider` | A light runs back and forth along the row (optionally to the beat). |
+| `beat-pulse` 🎵 | Colour steps on the beat, dimmer pumps with the bass, sweeps locked to the beat. |
+| `beat-flash` 🎵 | One head flashes per beat, in turn or at random. |
+| `beat-jump` 🎵 | Every few beats the heads jump to new random positions and colours. |
+| `spectrum` 🎵 | The row is a live spectrum: bass at one end, highs at the other. |
+| `fan-converge` 🎵 | The beams open into a fan and close onto one spot, in time with the music. |
+| `cycle` | Plays other effects in turn. |
+| `reset-heads` | Holds the heads' reset channel for 6 s so they re-home pan and tilt. |
+
+🎵 plays to the music (microphone; without it, the timed Fallback beat). The movement effects
+assume the heads in a row, in address order.
+
 ## How a script runs
 
 ```js
@@ -33,7 +55,8 @@ The lights are described once, in `setup.js`, and every effect loads it with
   fixture. It has the mini moving head in 12- and 10-channel mode and the 13-channel head.
 * `heads`: the rig, one `fixture(address, TYPES.…)` per light.
 * `ready()`: puts every head under DMX control (no built-in program, no strobe, fastest
-  pan/tilt).
+  pan/tilt) and starts colour, gobo, LED ring and prism from white, open and off. Call it first
+  in `frame()`, then set what the effect uses, so nothing is left over from the previous effect.
 * `WHEEL` / `RING`: colour positions for the colour effects.
 
 Change a channel, readdress a light or add a new type there, and every effect follows. Saving
@@ -85,7 +108,8 @@ Each effect in the list runs as a **child**, loaded with `effect(name)`:
   `fan-circle.js line 12: …`.
 
 Channels an effect set keep their last value when the next one takes over, so a colour chase after
-a circle holds the heads where the circle left them.
+a circle holds the heads where the circle left them. Colour, gobo, LED ring and prism don't carry
+over: every effect's `ready()` starts them from white, open and off.
 
 ## Music: the `audio` object
 
