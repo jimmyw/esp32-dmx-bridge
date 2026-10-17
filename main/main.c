@@ -7,7 +7,9 @@
 #include "dmx_buffer.h"
 #include "dmx_out.h"
 #include "driver/gpio.h"
+#include "cJSON.h"
 #include "esp_app_desc.h"
+#include "esp_heap_caps.h"
 #include "esp_log.h"
 #include "esp_ota_ops.h"
 #include "names.h"
@@ -83,9 +85,18 @@ static void ui_task(void *arg)
     }
 }
 
+// JSON for the API in PSRAM: a script's status with many sliders (cycle.js: ~90) needs tens of
+// KB of cJSON nodes, more than the internal RAM the network stack leaves free.
+static void *json_malloc(size_t size)
+{
+    void *p = heap_caps_malloc(size, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+    return p ? p : malloc(size);
+}
+
 void app_main(void)
 {
     ESP_LOGI(TAG, "DMX bridge %s", esp_app_get_description()->version);
+    cJSON_InitHooks(&(cJSON_Hooks){ .malloc_fn = json_malloc, .free_fn = free });
 
     esp_err_t err = nvs_flash_init();
     if (err == ESP_ERR_NVS_NO_FREE_PAGES || err == ESP_ERR_NVS_NEW_VERSION_FOUND) {
