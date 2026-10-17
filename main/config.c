@@ -15,12 +15,14 @@
 static const char *TAG = "config";
 static const char *NVS_NS = "bridge";
 static const char *NVS_KEY = "cfg";
-#define CONFIG_VERSION 4
+#define CONFIG_VERSION 5
 // Each version appended fields: v1 ended at loss_timeout_ms, v2 added the microphone, v3 the beat
-// offset, v4 the fallback tempo. An older blob is a prefix (plus padding) of the current struct.
+// offset, v4 the fallback tempo, v5 the always-on AP. An older blob is a prefix (plus padding) of
+// the current struct.
 static const size_t s_version_size[CONFIG_VERSION + 1] = {
     0, offsetof(bridge_config_t, mic_sck), offsetof(bridge_config_t, beat_offset_ms),
-    offsetof(bridge_config_t, fallback_bpm), sizeof(bridge_config_t),
+    offsetof(bridge_config_t, fallback_bpm), offsetof(bridge_config_t, ap_always),
+    sizeof(bridge_config_t),
 };
 
 typedef struct {
@@ -61,8 +63,7 @@ bool config_pin_valid(int pin, bool allow_none)
 static void set_defaults(void)
 {
     memset(&g_config, 0, sizeof(g_config));
-    snprintf(g_config.hostname, sizeof(g_config.hostname), "%s-%s",
-             CONFIG_DMX_HOSTNAME_PREFIX, s_mac_suffix);
+    strlcpy(g_config.hostname, CONFIG_DMX_HOSTNAME, sizeof(g_config.hostname));
     snprintf(g_config.name, sizeof(g_config.name), "DMX Bridge %s", s_mac_suffix);
     g_config.protocol         = PROTO_BOTH;
     g_config.artnet_port_addr = 0;
@@ -101,9 +102,9 @@ static void sanitize(void)
     if (g_config.beat_offset_ms < -300 || g_config.beat_offset_ms > 300) g_config.beat_offset_ms = 0;
     if (g_config.fallback_bpm > 180) g_config.fallback_bpm = 180;   // the tempo range the tracker follows
     if (g_config.fallback_bpm != 0 && g_config.fallback_bpm < 60) g_config.fallback_bpm = 60;
+    if (g_config.ap_always > 1) g_config.ap_always = 0;
     if (g_config.hostname[0] == '\0') {
-        snprintf(g_config.hostname, sizeof(g_config.hostname), "%s-%s",
-                 CONFIG_DMX_HOSTNAME_PREFIX, s_mac_suffix);
+        strlcpy(g_config.hostname, CONFIG_DMX_HOSTNAME, sizeof(g_config.hostname));
     }
     if (g_config.name[0] == '\0') {
         snprintf(g_config.name, sizeof(g_config.name), "DMX Bridge %s", s_mac_suffix);
@@ -182,7 +183,7 @@ const char *const CONFIG_KEYS[] = {
     "wifi_ssid", "wifi_pass", "hostname", "name", "protocol", "artnet_universe",
     "sacn_universe", "tx_pin", "de_pin", "led_pin", "uart", "refresh_hz", "on_loss",
     "loss_timeout_ms", "mic_sck", "mic_ws", "mic_sd", "mic_gate", "beat_sens", "beat_offset_ms",
-    "fallback_bpm", NULL,
+    "fallback_bpm", "ap_always", NULL,
 };
 
 static bool parse_int(const char *s, int lo, int hi, int *out)
@@ -274,6 +275,11 @@ const char *config_set_field(bridge_config_t *c, const char *key, const char *va
     } else if (strcmp(key, "fallback_bpm") == 0) {
         if (!parse_int(value, 0, 180, &v) || (v != 0 && v < 60)) return "fallback tempo must be 60-180 BPM, or 0 = off";
         c->fallback_bpm = v;
+    } else if (strcmp(key, "ap_always") == 0) {
+        if (strcmp(value, "on") == 0) value = "1";
+        if (strcmp(value, "off") == 0) value = "0";
+        if (!parse_int(value, 0, 1, &v)) return "ap_always: 1/on or 0/off";
+        c->ap_always = v;
     } else if (strcmp(key, "beat_offset_ms") == 0) {
         if (!parse_int(value, -300, 300, &v)) return "beat offset must be -300..300 ms";
         c->beat_offset_ms = v;

@@ -147,7 +147,9 @@ static void supervisor_task(void *arg)
         if (s_sta_connected) {
             disconnected_s = 0;
             connected_s++;
-            if (s_ap_active && connected_s >= AP_LINGER_S && s_ap_clients == 0) {
+            if (g_config.ap_always) {
+                set_ap(true);
+            } else if (s_ap_active && connected_s >= AP_LINGER_S && s_ap_clients == 0) {
                 set_ap(false);
             }
             continue;
@@ -156,7 +158,7 @@ static void supervisor_task(void *arg)
         connected_s = 0;
         disconnected_s++;
         since_attempt_s++;
-        if (!s_ap_active && disconnected_s >= AP_FALLBACK_S) {
+        if (!s_ap_active && (g_config.ap_always || disconnected_s >= AP_FALLBACK_S)) {
             set_ap(true);
         }
         int interval = s_ap_active ? STA_RETRY_AP_S : STA_RETRY_S;
@@ -208,7 +210,7 @@ esp_err_t wifi_mgr_start(void)
     ESP_ERROR_CHECK(esp_event_handler_register(WIFI_EVENT, ESP_EVENT_ANY_ID, event_handler, NULL));
     ESP_ERROR_CHECK(esp_event_handler_register(IP_EVENT, IP_EVENT_STA_GOT_IP, event_handler, NULL));
 
-    snprintf(s_ap_ssid, sizeof(s_ap_ssid), "DMX-Bridge-%s", config_mac_suffix());
+    snprintf(s_ap_ssid, sizeof(s_ap_ssid), "DMX-%s", config_mac_suffix());
     wifi_config_t ap = { 0 };
     strlcpy((char *)ap.ap.ssid, s_ap_ssid, sizeof(ap.ap.ssid));
     ap.ap.ssid_len = strlen(s_ap_ssid);

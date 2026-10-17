@@ -14,12 +14,12 @@ menu "DMX Bridge"
         default 1
 
     config DMX_AP_PASSWORD
-        string "Provisioning AP password (empty = open, else >= 8 chars)"
-        default "dmxbridge"
+        string "Access point password (empty = open, else >= 8 chars)"
+        default ""
 
-    config DMX_HOSTNAME_PREFIX
-        string "Hostname prefix (MAC suffix is appended)"
-        default "dmx-bridge"
+    config DMX_HOSTNAME
+        string "Default hostname (<hostname>.local)"
+        default "dmx"
 
     config DMX_RESET_GPIO
         int "Factory-reset button GPIO (hold 5 s)"

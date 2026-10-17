@@ -41,6 +41,9 @@ typedef struct {
     // v4:
     uint8_t  fallback_bpm;       // scripts' timed beat (60-180) when the microphone gives no
                                  // tempo, 0 = none
+    // v5:
+    uint8_t  ap_always;          // 1 = access point always on, next to the Wi-Fi; 0 = only
+                                 // while the Wi-Fi is unreachable
 } bridge_config_t;
 
 // Global, live configuration. Readers may access fields directly; writers use config_save().
@@ -55,7 +58,7 @@ const char *config_mac_suffix(void);   // "A1B2" (last 2 MAC bytes)
 // Set one field of `c` from its text form (shared by the web API and the serial CLI).
 // Keys: wifi_ssid wifi_pass hostname name protocol artnet_universe sacn_universe tx_pin
 // de_pin led_pin uart refresh_hz on_loss loss_timeout_ms mic_sck mic_ws mic_sd mic_gate beat_sens
-// beat_offset_ms fallback_bpm. Returns NULL or an error message.
+// beat_offset_ms fallback_bpm ap_always. Returns NULL or an error message.
 // Changing wifi_ssid clears wifi_pass, so set the SSID first.
 const char *config_set_field(bridge_config_t *c, const char *key, const char *value);
 

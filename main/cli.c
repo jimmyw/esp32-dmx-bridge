@@ -106,6 +106,7 @@ static int cmd_config(int argc, char **argv)
     printf("beat_sens       = %u  (x%.1f)\n", c->beat_sens, c->beat_sens / 10.0);
     printf("beat_offset_ms  = %d  (beats %s)\n", c->beat_offset_ms, c->beat_offset_ms >= 0 ? "earlier" : "later");
     printf("fallback_bpm    = %u%s\n", c->fallback_bpm, c->fallback_bpm ? "  (scripts' beat without music)" : "  (off)");
+    printf("ap_always       = %u%s\n", c->ap_always, c->ap_always ? "  (access point always on)" : "  (only without Wi-Fi)");
     return 0;
 }
 

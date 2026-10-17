@@ -181,6 +181,7 @@ static esp_err_t config_get(httpd_req_t *req)
     cJSON_AddNumberToObject(r, "beat_sens", g_config.beat_sens);
     cJSON_AddNumberToObject(r, "beat_offset_ms", g_config.beat_offset_ms);
     cJSON_AddNumberToObject(r, "fallback_bpm", g_config.fallback_bpm);
+    cJSON_AddNumberToObject(r, "ap_always", g_config.ap_always);
     return send_json(req, r);
 }
 

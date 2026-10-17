@@ -6,10 +6,10 @@ import { Status, useStatus } from '../common/Status';
 
 const FIELDS = ['wifi_ssid', 'protocol', 'artnet_universe', 'sacn_universe', 'on_loss', 'loss_timeout_ms',
                 'refresh_hz', 'name', 'hostname', 'tx_pin', 'de_pin', 'uart', 'led_pin',
-                'mic_sck', 'mic_ws', 'mic_sd', 'mic_gate', 'beat_sens'];
+                'mic_sck', 'mic_ws', 'mic_sd', 'mic_gate', 'beat_sens', 'ap_always'];
 const NUMERIC = new Set(['protocol', 'artnet_universe', 'sacn_universe', 'on_loss', 'loss_timeout_ms',
                          'refresh_hz', 'tx_pin', 'de_pin', 'uart', 'led_pin',
-                         'mic_sck', 'mic_ws', 'mic_sd', 'mic_gate', 'beat_sens']);
+                         'mic_sck', 'mic_ws', 'mic_sd', 'mic_gate', 'beat_sens', 'ap_always']);
 
 function artHint(v) {
   v = +v || 0;
@@ -111,6 +111,12 @@ export function App() {
               <input id="wifi_pass" name="wifi_pass" type="password" autocomplete="new-password" value={pass}
                      onInput={e => setPass(e.currentTarget.value)} />
               <div class="hint">{passSet ? 'Saved – leave empty to keep' : ''}</div></div>
+            <div><label for="ap_always">Access point {status ? `(${status.wifi.ap_ssid})` : ''}</label>
+              <select {...bind('ap_always')}>
+                <option value="0">Only when the Wi-Fi is unreachable</option>
+                <option value="1">Always on</option>
+              </select>
+              <div class="hint">Open network: join it with a phone, then http://192.168.4.1</div></div>
           </div>
           <div class="actions">
             <button type="button" class="sec" onClick={scan}>Scan networks</button>

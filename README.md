@@ -111,22 +111,26 @@ there; `idf.py build` re-bundles them when they change. To build only the web UI
 The script engine is [Duktape](https://duktape.org) 2.7.0, vendored in `components/duktape/` with a
 few config changes (see its README).
 
-Default pins, UART, AP password and hostname prefix are under `idf.py menuconfig` → *DMX Bridge*.
+Default pins, UART, AP password (default none: an open AP) and hostname (default `dmx`) are under `idf.py menuconfig` → *DMX Bridge*.
 All of them except the AP password can also be changed in the web UI.
 
 ## First-time setup (Wi-Fi provisioning)
 
-1. With no Wi-Fi stored, the bridge opens an access point **`DMX-Bridge-XXXX`**
-   (password `dmxbridge`). XXXX is the end of its MAC address.
+1. With no Wi-Fi stored, the bridge opens an open access point (no password) **`DMX-XXXX`**.
+   XXXX is the end of its MAC address.
 2. Join it with a phone or laptop. The captive portal opens the settings page; if it doesn't,
    browse to `http://192.168.4.1/settings`.
 3. Click *Scan networks*, pick your SSID, enter the password and click **Save**. The bridge
    restarts and joins your Wi-Fi.
-4. Find it at **`http://dmx-bridge-XXXX.local`**, or check your router's DHCP list.
+4. Find it at **`http://dmx.local`**, or check your router's DHCP list.
 
 If the Wi-Fi is unreachable for 20 s the AP comes back, so you can always reconfigure it. It keeps
 retrying your network in the background and closes the AP once it is connected and nobody is on
 the AP.
+
+**Access point always on** (Settings → Wi-Fi): the bridge keeps its open AP `DMX-XXXX` up next to
+your Wi-Fi, so a phone can join it directly and open `http://192.168.4.1`. The AP then shares the
+Wi-Fi's channel and airtime, so Art-Net/sACN gets slightly less.
 
 **Over USB instead:** connect a serial terminal (`idf.py -p <port> monitor`, or
 `picocom /dev/ttyACM*`) and type `wifi "My Network" mypassword`. The bridge saves it and
@@ -138,8 +142,9 @@ settings, as does the button in the web UI.
 
 ## Discovery
 
-* **mDNS:** `dmx-bridge-XXXX.local`, with services `_http._tcp` (web UI), `_artnet._udp` and
-  `_sacn._udp`. The TXT records carry `universe`, `proto`, `fw` and `mac`.
+* **mDNS:** `dmx.local` (give each bridge its own hostname in Settings when you have more than
+  one), with services `_http._tcp` (web UI), `_artnet._udp` and `_sacn._udp`. The TXT records
+  carry `universe`, `proto`, `fw` and `mac`.
   `avahi-browse -rt _artnet._udp` lists them.
 * **Art-Net:** answers ArtPoll, so it appears in QLC+'s node list and in any Art-Net tool.
 
@@ -162,7 +167,7 @@ Art-Net counts as priority 100.
 
 ## Fader console (`/console`)
 
-A lighting-desk style page at `http://dmx-bridge-XXXX.local/console` (button on the main page):
+A lighting-desk style page at `http://dmx.local/console` (button on the main page):
 
 * Fader strips with value readout, an output meter (what really goes out, QLC+ included),
   **Flash** (momentary full) and **0**. As many faders per bank as fit the screen (4–5 on a phone
@@ -315,7 +320,7 @@ page (`/settings`):
 JSON API: `GET /api/status`, `GET/POST /api/config`, `GET /api/scan`, `POST /api/reboot`,
 `POST /api/factory_reset`,
 `POST /api/ota` (raw `.bin` as the body, e.g.
-`curl --data-binary @build/dmx_bridge.bin http://dmx-bridge-XXXX.local/api/ota`),
+`curl --data-binary @build/dmx_bridge.bin http://dmx.local/api/ota`),
 `POST /api/www` (web package `.tar` as the body). Scripts: see [`scripts/README.md`](scripts/README.md).
 
 ### Web pages
