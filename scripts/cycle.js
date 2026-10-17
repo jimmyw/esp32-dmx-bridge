@@ -1,7 +1,13 @@
-// Cycle: plays other effects in turn, each for a while, then the next one. Edit the list to
-// choose them; a cycle can play other cycles too. Each effect keeps its own sliders (shown as
-// "fan-circle.speed" etc.) and picks up where it left off on its next turn.
-var effects = [effect('fan-circle'), effect('figure-eight'), effect('color-chase')];
+// Cycle: plays other effects in turn, each for a while, then the next one: all the bundled
+// effects, calm ones and music ones mixed. Edit the list to choose them; a cycle can play other
+// cycles too. Each effect keeps its own sliders (shown as "fan-circle.speed" etc.) and picks up
+// where it left off on its next turn.
+var effects = [
+  effect('fan-circle'), effect('beat-pulse'), effect('wave'), effect('beat-flash'),
+  effect('figure-eight'), effect('beat-jump'), effect('scissors'), effect('spectrum'),
+  effect('ballyhoo'), effect('fan-converge'), effect('color-chase'), effect('knight-rider'),
+  effect('searchlight'), effect('rainbow-fan')
+];
 var current = -1, left = 0, until = 0;
 var clock = effects.map(function () { return 0; });   // each effect's own running time
 

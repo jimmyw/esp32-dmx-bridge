@@ -26,8 +26,8 @@ static const char *TAG = "script";
 
 #define BASE             "/scripts"
 #define LABEL            "scripts"
-#define MAX_PARAMS       32
-#define MAX_INCLUDES     16                  // include()d files and effect() children
+#define MAX_PARAMS       128                 // children's included: cycle.js loads every effect
+#define MAX_INCLUDES     32                  // include()d files and effect() children
 #define PARAM_NAME_MAX   39                  // room for "cycle.fan-circle.speed"
 #define LOG_SIZE         4096
 #define TASK_STACK       24576
@@ -102,7 +102,7 @@ static SemaphoreHandle_t s_lock;
 static char    s_running[SCRIPT_NAME_MAX + 1];
 static char    s_error[200];
 static char    s_error_name[SCRIPT_NAME_MAX + 1];
-static param_t s_params[MAX_PARAMS];
+static param_t *s_params;                   // [MAX_PARAMS], in PSRAM when there is some
 static int     s_nparams;
 static int64_t s_params_dirty_us;            // 0 = saved
 static char    s_log[LOG_SIZE];
@@ -1167,6 +1167,10 @@ esp_err_t script_init(void)
     } else {
         s_heap_caps = MALLOC_CAP_8BIT;
         s_heap_limit = 64 * 1024;
+    }
+    s_params = heap_caps_calloc(MAX_PARAMS, sizeof(param_t), s_heap_caps);
+    if (!s_params) {
+        return ESP_ERR_NO_MEM;
     }
 
     const esp_vfs_spiffs_conf_t conf = {

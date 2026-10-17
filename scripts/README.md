@@ -82,17 +82,17 @@ new firmware; your existing files are not touched.
 * Errors stop the script. The message, with its line number, shows on the scripts page, in the
   console's FX bar and in the log.
 * Limits: top-level code may run 3 s and each `frame()` call 1 s; past that the script is stopped
-  as an endless loop. Up to 32 sliders per script (children's included). The script gets a 768 KB heap (PSRAM), and scripts can be up to 32 KB each.
+  as an endless loop. Up to 128 sliders per script (children's included) and 32 included files and children. The script gets a 768 KB heap (PSRAM), and scripts can be up to 32 KB each.
 * Duktape implements **ES5.1**: use `var` and `function`. Arrow functions, `let`/`class` and
   template strings don't parse.
 
 ## Playing effects in turn: `cycle.js`
 
 `cycle.js` plays other effects one after another, each for `seconds` (a slider, default 20), then
-the next:
+the next. It comes with every bundled effect in its list; edit the list to choose:
 
 ```js
-var effects = [effect('fan-circle'), effect('figure-eight'), effect('color-chase')];
+var effects = [effect('fan-circle'), effect('beat-pulse'), effect('wave'), /* ... */];
 ```
 
 Each effect in the list runs as a **child**, loaded with `effect(name)`:
