@@ -1030,6 +1030,34 @@ void script_stop(void)
     autorun_set(NULL);
 }
 
+const char *script_next(void)
+{
+    static char next[SCRIPT_NAME_MAX + 1];
+    char cur[SCRIPT_NAME_MAX + 1], first[SCRIPT_NAME_MAX + 1] = "";
+    next[0] = '\0';
+    xSemaphoreTake(s_lock, portMAX_DELAY);
+    strlcpy(cur, s_running, sizeof(cur));
+    xSemaphoreGive(s_lock);
+
+    DIR *d = s_mounted ? opendir(BASE) : NULL;
+    if (!d) return NULL;
+    struct dirent *e;
+    while ((e = readdir(d))) {
+        size_t n = strlen(e->d_name);
+        if (n <= 3 || n - 3 > SCRIPT_NAME_MAX || strcmp(e->d_name + n - 3, ".js") != 0) continue;
+        char name[SCRIPT_NAME_MAX + 1];
+        memcpy(name, e->d_name, n - 3);
+        name[n - 3] = '\0';
+        if (script_is_lib(name) || strcmp(name, "reset-heads") == 0) continue;
+        if (!first[0] || strcmp(name, first) < 0) strlcpy(first, name, sizeof(first));
+        if (strcmp(name, cur) > 0 && (!next[0] || strcmp(name, next) < 0)) strlcpy(next, name, sizeof(next));
+    }
+    closedir(d);
+    if (!next[0]) strlcpy(next, first, sizeof(next));   // past the last one: wrap round
+    if (!next[0] || script_run(next)) return NULL;
+    return next;
+}
+
 const char *script_write(const char *name, const char *src, size_t len)
 {
     if (!s_mounted) return "no scripts partition";

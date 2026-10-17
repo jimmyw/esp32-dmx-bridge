@@ -25,6 +25,9 @@ const char *script_write(const char *name, const char *src, size_t len);   // NU
 const char *script_delete(const char *name);
 const char *script_run(const char *name);    // (re)start; returns NULL or an error
 void        script_stop(void);
+// Start the effect after the running one, in name order, wrapping round (the BOOT button).
+// Skips shared files and reset-heads. Returns the name started, or NULL with no effects.
+const char *script_next(void);
 const char *script_set_param(const char *name, double value);
 
 // {"running":"fan-circle"|null,"failed":{"name":..,"error":"line 3: .."},

@@ -27,8 +27,10 @@
 static const char *TAG = "main";
 
 #define RESET_HOLD_MS 5000
+#define NEXT_MAX_MS   1000   // a press shorter than this starts the next effect
 
-// Factory-reset button + status LED.
+// BOOT button: a short press starts the next effect, held 5 s it resets to factory settings.
+// Status LED.
 // LED: AP mode = fast blink, connecting = slow blink, connected = on, DMX received = flicker.
 static void ui_task(void *arg)
 {
@@ -61,6 +63,11 @@ static void ui_task(void *arg)
                 esp_restart();
             }
         } else {
+            if (held_ms > 0 && held_ms < NEXT_MAX_MS) {
+                const char *name = script_next();
+                ESP_LOGI(TAG, "button: %s", name ? name : "no effect to start");
+                if (name) beat_led_test(40, 40, 40, 150);   // a short white blink: switched
+            }
             held_ms = 0;
         }
 
@@ -119,7 +126,7 @@ void app_main(void)
     beat_led_start();   // board RGB LED flashes on the beat
     script_init();   // effect scripts; restarts the one that was running
     ESP_ERROR_CHECK(web_start());
-    xTaskCreate(ui_task, "ui", 3072, NULL, 3, NULL);
+    xTaskCreate(ui_task, "ui", 4096, NULL, 3, NULL);
     ESP_ERROR_CHECK(cli_start());
 
     // Everything came up: confirm a freshly uploaded firmware so the bootloader keeps it.

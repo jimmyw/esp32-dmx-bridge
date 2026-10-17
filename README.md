@@ -132,7 +132,9 @@ the AP.
 `picocom /dev/ttyACM*`) and type `wifi "My Network" mypassword`. The bridge saves it and
 restarts. See [Serial console](#serial-console).
 
-**Factory reset:** hold BOOT (GPIO0) for 5 s, or use the button in the web UI.
+**BOOT button (GPIO0):** a short press starts the next effect script, in name order (the beat
+LED blinks white); shared files and `reset-heads` are skipped. Held for 5 s it resets to factory
+settings, as does the button in the web UI.
 
 ## Discovery
 
